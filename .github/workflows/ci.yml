@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  swift:
+    name: Swift (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: swift --version
+      - name: Debug build
+        run: swift build
+      - name: Tests
+        run: swift test
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Swift/Python tool contract
+        env:
+          ACCIO_TEST_NATIVE_BINARY: .build/debug/AccioComputerUse
+        run: >-
+          python -m unittest
+          coding.tests.test_helpers.HelperTests.test_built_native_tool_schemas_match_static_helpers
+      - name: Release build
+        run: swift build -c release --product AccioComputerUse
+
+  python:
+    name: Python ${{ matrix.python }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Tests
+        run: python -m unittest discover -s coding/tests -p 'test_*.py'
+
+  scripts:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Syntax
+        run: |
+          bash -n scripts/install-macos.sh
+          bash -n scripts/install-daemon.sh
+          bash -n scripts/lib/install-macos-signing-policy.sh

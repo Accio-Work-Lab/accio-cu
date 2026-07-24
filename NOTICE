@@ -1,0 +1,12 @@
+Accio Computer Use
+Copyright 2026 Accio Work Lab
+
+This product includes a terminal wordmark adapted from the public "bit" ANSI
+font project:
+https://github.com/paulilaaso/bit
+
+The upstream copyright and license text are reproduced in
+THIRD_PARTY_NOTICES.md.
+
+No Apple private framework code is redistributed. Accio dynamically calls
+selected private SkyLight symbols available on the user's own macOS system.

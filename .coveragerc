@@ -1,0 +1,12 @@
+[run]
+branch = True
+parallel = True
+relative_files = True
+source =
+    coding/accio_cu_code
+
+[report]
+show_missing = True
+skip_covered = True
+exclude_lines =
+    if __name__ == .__main__.:

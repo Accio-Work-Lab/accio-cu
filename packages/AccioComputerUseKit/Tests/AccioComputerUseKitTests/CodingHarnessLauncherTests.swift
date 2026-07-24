@@ -1,0 +1,96 @@
+import Foundation
+import Testing
+@testable import AccioComputerUseKit
+
+@Test("coding runner is resolved beside the app-bundled native executable")
+func codingRunnerResolvesFromAppBundleLayout() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let executable = root
+        .appendingPathComponent("Accio Computer Use.app/Contents/MacOS/accio-computer-use")
+    let runner = root
+        .appendingPathComponent("Accio Computer Use.app/Contents/Resources/coding/runner.py")
+    try FileManager.default.createDirectory(
+        at: runner.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    #expect(FileManager.default.createFile(atPath: runner.path, contents: Data()))
+
+    let resolved = CodingHarnessLauncher.runnerURL(
+        environment: [:],
+        bundleResourceURL: nil,
+        executableURL: executable,
+        currentDirectoryURL: root.appendingPathComponent("unrelated")
+    )
+
+    #expect(resolved == runner)
+}
+
+@Test("coding runner environment override has priority")
+func codingRunnerEnvironmentOverrideHasPriority() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let override = root.appendingPathComponent("custom-runner.py")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    #expect(FileManager.default.createFile(atPath: override.path, contents: Data()))
+
+    let resolved = CodingHarnessLauncher.runnerURL(
+        environment: [CodingHarnessLauncher.runnerEnvironmentKey: override.path],
+        bundleResourceURL: nil,
+        executableURL: root.appendingPathComponent("missing"),
+        currentDirectoryURL: root.appendingPathComponent("unrelated")
+    )
+
+    #expect(resolved == override)
+}
+
+@Test("coding runner is resolved from a source checkout outside its working directory")
+func codingRunnerResolvesFromSourceCheckout() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let executable = root.appendingPathComponent(".build/debug/AccioComputerUse")
+    let runner = root.appendingPathComponent("coding/runner.py")
+    try FileManager.default.createDirectory(
+        at: runner.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    #expect(FileManager.default.createFile(atPath: runner.path, contents: Data()))
+
+    let resolved = CodingHarnessLauncher.runnerURL(
+        environment: [:],
+        bundleResourceURL: nil,
+        executableURL: executable,
+        currentDirectoryURL: root.appendingPathComponent("unrelated")
+    )
+
+    #expect(resolved == runner)
+}
+
+@Test("coding runner is never loaded implicitly from the working directory")
+func codingRunnerIgnoresWorkingDirectory() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let runner = root.appendingPathComponent("coding/runner.py")
+    try FileManager.default.createDirectory(
+        at: runner.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    #expect(FileManager.default.createFile(atPath: runner.path, contents: Data()))
+
+    let resolved = CodingHarnessLauncher.runnerURL(
+        environment: [:],
+        bundleResourceURL: nil,
+        executableURL: root.appendingPathComponent("untrusted/accio-computer-use"),
+        currentDirectoryURL: root
+    )
+
+    #expect(resolved == nil)
+}
