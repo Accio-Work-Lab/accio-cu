@@ -183,7 +183,7 @@ private struct CursorArtwork {
         geometry: CursorWindowGeometry(
             windowSize: SoftwareCursorGlyphMetrics.windowSize,
             tipAnchor: SoftwareCursorGlyphMetrics.tipAnchor
-        ),
+        )
     )
 }
 
@@ -508,7 +508,10 @@ enum SoftwareCursorOverlay {
         }
     }
 
-    private static func candidatePreference(_ lhs: CursorMotionCandidate, _ rhs: CursorMotionCandidate) -> Bool {
+    nonisolated private static func candidatePreference(
+        _ lhs: CursorMotionCandidate,
+        _ rhs: CursorMotionCandidate
+    ) -> Bool {
         if lhs.measurement.staysInBounds != rhs.measurement.staysInBounds {
             return lhs.measurement.staysInBounds && !rhs.measurement.staysInBounds
         }
