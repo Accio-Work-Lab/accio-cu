@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="resources/AccioCULogo.png" alt="Accio Computer Use logo" width="260">
+
 # Accio Computer Use
 
 **Hybrid computer use for AI agents.**
