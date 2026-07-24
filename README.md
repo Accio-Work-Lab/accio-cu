@@ -6,11 +6,10 @@
 
 GUI actions, CLIs, APIs, and files—combined in one Python block.
 
-[![CI](https://github.com/Accio-Work-Lab/accio-cu/actions/workflows/ci.yml/badge.svg)](https://github.com/Accio-Work-Lab/accio-cu/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.0.1-green.svg)](VERSION)
 
-[Quick start](#quick-start) · [Security](#security) · [Results](#macosworld-results) · [Contributing](CONTRIBUTING.md)
+[Quick start](#quick-start) · [Security](#security) · [Results](#macosworld-results) · [Citation](#citation) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -196,6 +195,27 @@ bash -n scripts/install-daemon.sh
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution and platform-testing
 requirements.
+
+## Authors
+
+Tianyuan Yang<sup>\*</sup>, Yu Gu<sup>\*</sup>, Lanbo Lin, Yuanwu Xu, Li Cai,
+and Sicong Xie
+
+<sup>\*</sup> Equal contribution.
+
+## Citation
+
+If you use Accio Computer Use in your work, please cite this repository:
+
+```bibtex
+@misc{Yang2026Accio,
+    author={Tianyuan Yang and Yu Gu and Lanbo Lin and Yuanwu Xu and Li Cai and Sicong Xie},
+    title={Accio Computer Use},
+    note={GitHub repository},
+    howpublished={\url{https://github.com/Accio-Work-Lab/accio-cu}},
+    year={2026}
+}
+```
 
 ## License
 
