@@ -35,7 +35,18 @@ class PublicEntrypointTests(unittest.TestCase):
         self.assertIn('ACCIO_CLI="$(command -v accio-computer-use)"', skill)
         self.assertIn('[Errno 1] Operation not permitted', skill)
         self.assertIn('sandbox_permissions: "require_escalated"', skill)
+        self.assertIn("`accio-computer-use daemon-status`", skill)
+        self.assertIn("daemon-health evidence", skill)
         self.assertNotIn("`accio-cu-code`", skill)
+
+    def test_daemon_scripts_verify_live_health(self):
+        daemon_installer = (REPO_ROOT / "scripts" / "install-daemon.sh").read_text()
+        app_installer = (REPO_ROOT / "scripts" / "install-macos.sh").read_text()
+
+        self.assertIn('daemon-status "$SOCKET_PATH"', daemon_installer)
+        self.assertIn("Status: loaded but unhealthy", daemon_installer)
+        self.assertIn("DAEMON_RESTART_HEALTHY", app_installer)
+        self.assertIn('"$REPO_ROOT/scripts/install-daemon.sh" status', app_installer)
 
     def test_scroll_skill_prefers_precise_filtering_and_visual_recovery(self):
         skill = (

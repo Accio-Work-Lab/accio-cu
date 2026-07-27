@@ -7,6 +7,7 @@ public enum CLICommand: Equatable {
     case setup
     case mcp
     case serve(socketPath: String?)
+    case daemonStatus(socketPath: String?)
     case doctor
     case listApps
     case snapshot(app: String)
@@ -119,6 +120,17 @@ public func parseCLI(
         if arguments.count >= 2, ["-h", "--help"].contains(arguments[1]) { return .help(command: "serve") }
         let socketPath = arguments.count >= 2 ? arguments[1] : nil
         return .serve(socketPath: socketPath)
+    case "daemon-status":
+        if arguments.count >= 2, ["-h", "--help"].contains(arguments[1]) {
+            return .help(command: "daemon-status")
+        }
+        guard arguments.count <= 2 else {
+            throw CLIError(
+                message: "daemon-status accepts at most one [socket-path] argument",
+                helpCommand: "daemon-status"
+            )
+        }
+        return .daemonStatus(socketPath: arguments.dropFirst().first)
     case "doctor":
         guard arguments.count == 1 else {
             if arguments.count == 2, ["-h", "--help"].contains(arguments[1]) { return .help(command: "doctor") }
@@ -171,7 +183,8 @@ public func helpText(command: String? = nil) -> String {
           setup                Recommended first-run setup and diagnostics TUI.
           mcp                  Start the low-level desktop-tool MCP server.
           serve [socket-path]  Start the daemon server on a Unix socket.
-          doctor               Print permission status.
+          daemon-status        Check for a live current-user daemon listener.
+          doctor               Print permission, daemon, and install status.
           list-apps            Print running or recently used apps.
           snapshot <app>       Print the current accessibility snapshot for an app.
           call <tool>          Call one tool and print the result.
@@ -227,17 +240,27 @@ public func helpText(command: String? = nil) -> String {
         forwarded from sandboxed CLI invocations. Start it in a
         terminal that has Accessibility + Screen Recording granted.
         """
+    case "daemon-status":
+        return """
+        Usage:
+          accio-computer-use daemon-status [socket-path]
+
+        Check that the daemon socket has a live listener owned by the current
+        user. A loaded LaunchAgent or an existing socket file alone is not
+        considered healthy. Exits nonzero when the listener is unavailable.
+        """
     case "doctor":
         return """
         Usage:
           accio-computer-use doctor
 
-        Print Accessibility and Screen Recording permission state, plus the
-        current app-bundle and executable identities. Effective permission state
-        comes from Apple's runtime APIs for this process. This command
-        does not open permission prompts; use `accio-computer-use setup` for the
-        interactive permission guide. A standalone CLI has a separate macOS
-        permission identity; the supported install uses the app-bundled CLI.
+        Print Accessibility and Screen Recording permission state, daemon
+        connectivity, and the current app-bundle and executable identities.
+        Effective permission state comes from Apple's runtime APIs for this
+        process. This command does not open permission prompts; use
+        `accio-computer-use setup` for the interactive permission guide. A
+        standalone CLI has a separate macOS permission identity; the supported
+        install uses the app-bundled CLI.
         """
     case "list-apps":
         return """

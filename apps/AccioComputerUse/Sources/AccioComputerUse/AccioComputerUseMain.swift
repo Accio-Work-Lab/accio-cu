@@ -74,9 +74,23 @@ enum AccioComputerUseMain {
             let daemon = DaemonServer(socketPath: path, service: service)
             try daemon.run()
 
+        case let .daemonStatus(socketPath):
+            let path = socketPath ?? DaemonServer.defaultSocketPath
+            if DaemonClient.isAvailable(socketPath: path) {
+                print("Daemon: running")
+                print("Socket: \(path)")
+            } else {
+                print("Daemon: unavailable")
+                print("Socket: \(path)")
+                exit(EXIT_FAILURE)
+            }
+
         case .doctor:
             let permissions = PermissionDiagnostics.current()
             print(permissions.summary)
+            let daemonAvailable = DaemonClient.isAvailable()
+            print("Daemon: \(daemonAvailable ? "running" : "unavailable")")
+            print("Socket: \(DaemonServer.defaultSocketPath)")
             print(PermissionSupport.installModelSummary())
             print("Current code identities (diagnostic only):")
             for line in PermissionSupport.authorizationIdentityLines() {
@@ -92,6 +106,12 @@ enum AccioComputerUseMain {
                     print("")
                 }
                 print("Run `accio-computer-use setup` to open an interactive permission guide.")
+            }
+            if !daemonAvailable {
+                print("")
+                print("No live current-user daemon listener is available.")
+                print("A loaded LaunchAgent or an existing socket file alone does not prove health.")
+                print("After permissions are effective, run `scripts/install-daemon.sh install`.")
             }
 
         case .listApps:

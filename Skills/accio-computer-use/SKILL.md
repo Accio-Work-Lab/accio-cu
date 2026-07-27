@@ -16,8 +16,10 @@ logic; use the preloaded helpers for desktop observation and interaction.
 The coding interface requires the Accio local daemon plus effective
 Accessibility and Screen Recording permissions. The local daemon is CLI
 runtime infrastructure, not a Codex MCP registration. On a new installation or
-after a connectivity failure, run `accio-computer-use doctor` and confirm the
-daemon is running before executing a coding block.
+after a connectivity failure, run `accio-computer-use doctor`, then require
+`Daemon: running` from `accio-computer-use daemon-status` or a successful
+coding call before executing the task. A loaded LaunchAgent or a socket file
+alone is not daemon-health evidence.
 
 ## Start here
 
@@ -356,8 +358,16 @@ already been received.
 ## Diagnostics and fallback
 
 Run `accio-computer-use doctor` when permissions, screenshots, or daemon
-connectivity fail. Run `accio-computer-use code --help` for execution limits
-and artifact options.
+connectivity fail. Use `accio-computer-use daemon-status` to verify a live
+current-user listener; `doctor` reports the same connectivity signal alongside
+permission and install diagnostics. Run `accio-computer-use code --help` for
+execution limits and artifact options.
+
+If terminal diagnostics show permissions granted but the persistent daemon is
+unavailable after rebuilding, refresh Accio Computer Use in Accessibility and
+Screen Recording, restart the menu bar helper, then run
+`scripts/install-daemon.sh install`. Verify with `daemon-status`; do not infer
+health from `launchctl print`, a plist, or a socket path alone.
 
 If a shell reports that the internal Python runner is missing, resolve the
 installed command through `PATH` and retry the coding smoke test:

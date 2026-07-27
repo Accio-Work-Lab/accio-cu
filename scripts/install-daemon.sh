@@ -37,8 +37,61 @@ find_binary() {
   echo "$CANONICAL_BINARY"
 }
 
+daemon_is_healthy() {
+  if [[ -x "$CANONICAL_BINARY" ]] &&
+     "$CANONICAL_BINARY" help daemon-status 2>/dev/null |
+       grep -q "accio-computer-use daemon-status"; then
+    "$CANONICAL_BINARY" daemon-status "$SOCKET_PATH" >/dev/null 2>&1
+    return
+  fi
+
+  # Compatibility probe for an older installed binary while this newer
+  # installer script is being used during an upgrade.
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$SOCKET_PATH" <<'PY'
+import os
+import socket
+import stat
+import sys
+
+path = sys.argv[1]
+try:
+    metadata = os.lstat(path)
+    if (
+        metadata.st_uid != os.getuid()
+        or not stat.S_ISSOCK(metadata.st_mode)
+        or metadata.st_mode & 0o077
+    ):
+        raise OSError("unsafe daemon socket")
+    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        connection.settimeout(0.5)
+        connection.connect(path)
+        if hasattr(connection, "getpeereid"):
+            peer_uid, _ = connection.getpeereid()
+            if peer_uid != os.getuid():
+                raise OSError("daemon peer belongs to another user")
+    finally:
+        connection.close()
+except OSError:
+    raise SystemExit(1)
+PY
+}
+
+wait_for_daemon_health() {
+  local attempt
+  for attempt in {1..20}; do
+    if daemon_is_healthy; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 install_daemon() {
   local binary
+  local health_status=0
   if ! binary=$(find_binary); then
     echo "Error: canonical $BINARY_NAME not found. Install it first with ./scripts/install-macos.sh"
     exit 1
@@ -81,15 +134,25 @@ EOF
 
   echo "Installed LaunchAgent: $PLIST_PATH"
 
-  # Load the daemon
+  # Load the daemon from a clean socket path. A prior process may have exited
+  # before removing its owned socket, so file existence is not health evidence.
   launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+  rm -f "$SOCKET_PATH"
   launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
-  echo "Daemon started. Socket: $SOCKET_PATH"
+  if wait_for_daemon_health; then
+    echo "Daemon started and health check passed. Socket: $SOCKET_PATH"
+  else
+    health_status=1
+    echo "WARNING: LaunchAgent loaded, but the daemon is not healthy." >&2
+    echo "Refresh Accessibility and Screen Recording, restart the helper, then retry." >&2
+    echo "Run: $0 status" >&2
+  fi
   echo "Logs: $LOG_DIR/daemon.log"
   echo ""
   echo "Important: run 'accio-computer-use setup' first and grant permissions"
   echo "to Accio Computer Use.app. The daemon should use the app-bundled CLI"
   echo "symlink installed by scripts/install-macos.sh."
+  return "$health_status"
 }
 
 uninstall_daemon() {
@@ -108,17 +171,31 @@ uninstall_daemon() {
 }
 
 status_daemon() {
-  if launchctl print "gui/$(id -u)/$LABEL" &>/dev/null; then
+  local launch_state=""
+  local last_exit=""
+  launch_state="$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null || true)"
+
+  if daemon_is_healthy; then
     echo "Status: running"
     echo "Socket: $SOCKET_PATH"
-    if [[ -S "$SOCKET_PATH" ]]; then
-      echo "Socket file: exists"
-    else
-      echo "Socket file: missing (daemon may have just started)"
-    fi
-  else
-    echo "Status: not running"
+    return 0
   fi
+
+  if [[ -n "$launch_state" ]]; then
+    echo "Status: loaded but unhealthy"
+    echo "Socket: $SOCKET_PATH"
+    last_exit="$(printf '%s\n' "$launch_state" | awk -F'= ' '/last exit code =/{print $2; exit}')"
+    if [[ -n "$last_exit" ]]; then
+      echo "Last exit code: $last_exit"
+    fi
+    echo "LaunchAgent is loaded, but no live current-user listener is available."
+    echo "Logs: $LOG_DIR/daemon.err"
+    return 1
+  fi
+
+  echo "Status: not running"
+  echo "Socket: $SOCKET_PATH"
+  return 1
 }
 
 usage() {
