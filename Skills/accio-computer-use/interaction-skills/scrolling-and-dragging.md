@@ -51,7 +51,16 @@ Inspect the returned state to confirm content moved. In virtualized lists,
 element identities may change after scrolling; use the new state before the
 next action.
 
-Prefer in-app search over repeated scrolling when the UI exposes search.
+When the exact off-screen target text is already known and the current view
+offers search or filtering, use that field before attempting scroll. This is
+both more precise and less sensitive to custom-rendered list behavior.
+
+Treat `changed=none` as inconclusive for scrolling because a pure geometry
+change may leave the AX text and structure unchanged. Inspect the returned
+screenshot or compare the first visible row before deciding whether content
+moved. If the screenshot confirms no movement, try one meaningfully different
+route; then switch to search, filtering, or direct navigation instead of
+repeating the same scroll.
 
 ## Drag with literal coordinates
 

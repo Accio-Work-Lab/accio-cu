@@ -583,6 +583,7 @@ public final class ComputerUseService {
             let repeatCount = integralScrollPageCount(pages)
             let pageAction = scrollPageAction(for: record, direction: normalized)
             let lineAction = scrollLineAction(for: record, direction: normalized)
+            let positionBefore = record.element.flatMap { deepDescendantPosition(of: $0) }
             let didAttemptScroll: Bool
             do {
                 didAttemptScroll = try performBackgroundScroll(
@@ -609,17 +610,24 @@ public final class ComputerUseService {
             settleVisualCursor(at: cursorTarget)
 
             let afterSnapshot = try refreshSnapshot(for: app)
+            let positionAfter = record.element.flatMap { deepDescendantPosition(of: $0) }
+            let movementConfirmed = scrollPositionChanged(
+                before: positionBefore,
+                after: positionAfter
+            )
             let pagesText = pages == 1 ? "1 page" : "\(pages) pages"
             var summary = "Scrolled \(normalized) \(pagesText) on \(elementSummary(for: record))."
-            summary = ActionResultSummary.line(
+            let actionResult = ActionResultSummary.make(
                 tool: "scroll",
                 target: elementSummary(for: record),
                 route: "background_scroll",
                 preState: preState,
-                postSnapshot: afterSnapshot
-            ) + "\n" + summary
+                postSnapshot: afterSnapshot,
+                changeLevelOverride: movementConfirmed ? .confirmed : nil
+            )
+            summary = actionResult.renderedLine + "\n" + summary
             let postFingerprint = structuralFingerprint(afterSnapshot)
-            if preFingerprint == postFingerprint {
+            if preFingerprint == postFingerprint && !movementConfirmed {
                 summary += "\n⚠ Scroll may not have taken effect — no visible content change detected."
             }
             return actionObservationResult(before: snapshot, after: afterSnapshot, actionSummary: summary)

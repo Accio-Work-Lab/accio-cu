@@ -37,6 +37,19 @@ class PublicEntrypointTests(unittest.TestCase):
         self.assertIn('sandbox_permissions: "require_escalated"', skill)
         self.assertNotIn("`accio-cu-code`", skill)
 
+    def test_scroll_skill_prefers_precise_filtering_and_visual_recovery(self):
+        skill = (
+            REPO_ROOT
+            / "Skills"
+            / "accio-computer-use"
+            / "interaction-skills"
+            / "scrolling-and-dragging.md"
+        ).read_text()
+
+        self.assertIn("exact off-screen target text", skill)
+        self.assertIn("Treat `changed=none` as inconclusive for scrolling", skill)
+        self.assertIn("screenshot confirms no movement", skill)
+
 
 if __name__ == "__main__":
     unittest.main()
