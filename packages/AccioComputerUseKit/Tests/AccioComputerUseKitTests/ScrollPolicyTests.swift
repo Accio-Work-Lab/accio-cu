@@ -43,3 +43,25 @@ func scrollPositionVerificationUsesGeometry() {
     #expect(scrollPositionChanged(before: original, after: CGPoint(x: 10, y: 21)))
     #expect(!scrollPositionChanged(before: nil, after: original))
 }
+
+@Test("scroll policy exposes opposite directions for transformed lists")
+func scrollPolicyProvidesOppositeDirection() {
+    #expect(oppositeScrollDirection(to: "up") == "down")
+    #expect(oppositeScrollDirection(to: "down") == "up")
+    #expect(oppositeScrollDirection(to: "left") == "right")
+    #expect(oppositeScrollDirection(to: "right") == "left")
+    #expect(oppositeScrollDirection(to: "unknown") == nil)
+}
+
+@Test("no-movement warning recommends one bounded opposite-direction retry")
+func noMovementWarningProvidesRecoveryDirection() {
+    #expect(noMovementScrollWarning(direction: "up").contains("direction=\"down\""))
+}
+
+@Test("stale scrolls with stable refs recommend safe re-resolution")
+func staleScrollWarningUsesStableRef() {
+    let stale = "stale snapshot_id 'abc'"
+
+    #expect(scrollStalenessRecoveryMessage(stale, hasStableRef: true).contains("omit snapshot_id"))
+    #expect(scrollStalenessRecoveryMessage(stale, hasStableRef: false) == stale)
+}

@@ -378,14 +378,47 @@ extension ComputerUseService {
 
         let freshSnapshot = try refreshSnapshot(for: app)
         guard let searchText = elementText else { return nil }
-        guard let resolved = try? lookupElementByText(snapshot: freshSnapshot, text: searchText) else {
-            return nil
-        }
+        let resolved = try? lookupElementByText(snapshot: freshSnapshot, text: searchText)
 
-        if let newFrame = resolved.localFrame, let wb = freshSnapshot.windowBounds {
+        if let resolved, let newFrame = resolved.localFrame, let wb = freshSnapshot.windowBounds {
             let newVisibleRect = CGRect(x: 0, y: 0, width: wb.width, height: wb.height)
             if newVisibleRect.intersects(newFrame) {
                 return resolved
+            }
+        }
+
+        // Reversed and transformed lists can report off-screen frames in the
+        // opposite coordinate order. Refresh the target, then retry once.
+        guard let fallbackDirection = oppositeScrollDirection(to: direction) else {
+            return nil
+        }
+        let fallbackTarget: ElementRecord
+        if let ancestorRecord = ancestorScrollContainer(of: resolved?.element, in: freshSnapshot) {
+            fallbackTarget = ancestorRecord
+        } else {
+            fallbackTarget = try defaultScrollTarget(in: freshSnapshot)
+        }
+        let fallbackPoint = try scrollableGlobalPoint(for: fallbackTarget, snapshot: freshSnapshot)
+        try performBackgroundScroll(
+            at: fallbackPoint,
+            direction: fallbackDirection,
+            pages: pages,
+            pageAction: scrollPageAction(for: fallbackTarget, direction: fallbackDirection),
+            lineAction: scrollLineAction(for: fallbackTarget, direction: fallbackDirection),
+            pageActionRepeatCount: integralScrollPageCount(pages),
+            scrollAnchor: fallbackTarget.element,
+            snapshot: freshSnapshot
+        )
+
+        Thread.sleep(forTimeInterval: 0.2)
+
+        let retrySnapshot = try refreshSnapshot(for: app)
+        if let retryResolved = try? lookupElementByText(snapshot: retrySnapshot, text: searchText),
+           let retryFrame = retryResolved.localFrame,
+           let wb = retrySnapshot.windowBounds {
+            let retryVisibleRect = CGRect(x: 0, y: 0, width: wb.width, height: wb.height)
+            if retryVisibleRect.intersects(retryFrame) {
+                return retryResolved
             }
         }
 

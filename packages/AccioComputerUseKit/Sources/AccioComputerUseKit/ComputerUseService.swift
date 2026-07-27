@@ -559,7 +559,14 @@ public final class ComputerUseService {
         }
 
         return try preservingFrontmostApp {
-            let snapshot = try snapshotAwareOfStaleness(for: app, snapshotId: snapshotId)
+            let snapshot: AppSnapshot
+            do {
+                snapshot = try snapshotAwareOfStaleness(for: app, snapshotId: snapshotId)
+            } catch let ComputerUseError.stateUnavailable(message) {
+                throw ComputerUseError.stateUnavailable(
+                    scrollStalenessRecoveryMessage(message, hasStableRef: stableRef != nil)
+                )
+            }
             try prepareForForegroundOperationIfNeeded(snapshot: snapshot, reason: .scrollFallback)
             let preFingerprint = structuralFingerprint(snapshot)
             let preState = ActionPreState(pid: snapshot.app.pid, fingerprint: preFingerprint, snapshot: snapshot)
@@ -628,7 +635,7 @@ public final class ComputerUseService {
             summary = actionResult.renderedLine + "\n" + summary
             let postFingerprint = structuralFingerprint(afterSnapshot)
             if preFingerprint == postFingerprint && !movementConfirmed {
-                summary += "\n⚠ Scroll may not have taken effect — no visible content change detected."
+                summary += "\n" + noMovementScrollWarning(direction: normalized)
             }
             return actionObservationResult(before: snapshot, after: afterSnapshot, actionSummary: summary)
         }

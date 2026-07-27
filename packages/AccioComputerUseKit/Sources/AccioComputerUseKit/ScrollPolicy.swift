@@ -60,3 +60,31 @@ func scrollPositionChanged(before: CGPoint?, after: CGPoint?) -> Bool {
     guard let before, let after else { return false }
     return before != after
 }
+
+func oppositeScrollDirection(to direction: String) -> String? {
+    switch direction {
+    case "up": return "down"
+    case "down": return "up"
+    case "left": return "right"
+    case "right": return "left"
+    default: return nil
+    }
+}
+
+func noMovementScrollWarning(direction: String) -> String {
+    guard let opposite = oppositeScrollDirection(to: direction) else {
+        return "⚠ Scroll may not have taken effect — no visible content change detected."
+    }
+    return """
+    ⚠ Scroll may not have taken effect — no visible content change detected. \
+    After visually confirming no movement, retry once with direction="\(opposite)"; \
+    transformed or reverse-ordered containers can expose inverted scroll semantics.
+    """
+}
+
+func scrollStalenessRecoveryMessage(_ message: String, hasStableRef: Bool) -> String {
+    guard hasStableRef, message.contains("stale snapshot_id") else {
+        return message
+    }
+    return message + " Since scrolling is reversible, retry with the same stable_ref and omit snapshot_id; the target will be re-resolved against fresh state."
+}

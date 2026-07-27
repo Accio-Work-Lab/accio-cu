@@ -55,12 +55,19 @@ When the exact off-screen target text is already known and the current view
 offers search or filtering, use that field before attempting scroll. This is
 both more precise and less sensitive to custom-rendered list behavior.
 
+In a live view, unrelated updates can invalidate a strict `snapshot_id` between
+repeated scrolls. If a scroll reports a stale snapshot and the intended
+container still has a `stable_ref`, retry with that same reference and omit
+`snapshot_id`; the runtime refreshes and re-resolves it. Restore a fresh
+snapshot precondition before the precise click or other consequential action.
+
 Treat `changed=none` as inconclusive for scrolling because a pure geometry
 change may leave the AX text and structure unchanged. Inspect the returned
 screenshot or compare the first visible row before deciding whether content
-moved. If the screenshot confirms no movement, try one meaningfully different
-route; then switch to search, filtering, or direct navigation instead of
-repeating the same scroll.
+moved. If the screenshot confirms no movement, retry the opposite direction
+once: transformed or reverse-ordered containers can expose inverted scroll
+semantics. If that also fails, switch to search, filtering, or direct
+navigation instead of repeating scrolls or dragging a scrollbar speculatively.
 
 ## Drag with literal coordinates
 
