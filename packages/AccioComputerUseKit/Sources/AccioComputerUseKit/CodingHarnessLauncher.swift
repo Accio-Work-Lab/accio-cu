@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 public enum CodingHarnessLaunchError: LocalizedError, Equatable {
@@ -21,10 +22,61 @@ public enum CodingHarnessLaunchError: LocalizedError, Equatable {
 public enum CodingHarnessLauncher {
     public static let runnerEnvironmentKey = "ACCIO_COMPUTER_USE_CODING_RUNNER"
 
+    public static func processExecutableURL(
+        argumentZero: String = CommandLine.arguments[0],
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) -> URL {
+        var bufferSize: UInt32 = 0
+        _ = _NSGetExecutablePath(nil, &bufferSize)
+        if bufferSize > 0 {
+            var buffer = [CChar](repeating: 0, count: Int(bufferSize))
+            let status = buffer.withUnsafeMutableBufferPointer { pointer in
+                _NSGetExecutablePath(pointer.baseAddress, &bufferSize)
+            }
+            if status == 0 {
+                let executableURL = buffer.withUnsafeBufferPointer { pointer in
+                    URL(
+                        fileURLWithFileSystemRepresentation: pointer.baseAddress!,
+                        isDirectory: false,
+                        relativeTo: nil
+                    )
+                }
+                return executableURL.resolvingSymlinksInPath()
+            }
+        }
+
+        return commandLineExecutableURL(
+            argumentZero: argumentZero,
+            environment: environment,
+            fileManager: fileManager
+        )
+    }
+
+    public static func commandLineExecutableURL(
+        argumentZero: String,
+        environment: [String: String],
+        fileManager: FileManager = .default
+    ) -> URL {
+        if argumentZero.contains("/") {
+            return URL(fileURLWithPath: argumentZero).resolvingSymlinksInPath()
+        }
+
+        for directory in environment["PATH", default: ""].split(separator: ":") {
+            let candidate = URL(fileURLWithPath: String(directory), isDirectory: true)
+                .appendingPathComponent(argumentZero)
+            if fileManager.isExecutableFile(atPath: candidate.path) {
+                return candidate.resolvingSymlinksInPath()
+            }
+        }
+
+        return URL(fileURLWithPath: argumentZero).resolvingSymlinksInPath()
+    }
+
     public static func runnerURL(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         bundleResourceURL: URL? = Bundle.main.resourceURL,
-        executableURL: URL = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath(),
+        executableURL: URL = processExecutableURL(),
         currentDirectoryURL: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
         fileManager: FileManager = .default
     ) -> URL? {

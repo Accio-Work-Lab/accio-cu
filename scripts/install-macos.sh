@@ -630,5 +630,11 @@ if [[ "$VERIFY" == true ]]; then
   echo "Running: $TARGET_PATH doctor"
   "$TARGET_PATH" doctor
   echo ""
+  echo "Running coding runner smoke test through the installed CLI path..."
+  "$TARGET_PATH" code --version
+  echo ""
+  echo "Running coding runner smoke test through PATH command lookup..."
+  env PATH="$INSTALL_DIR:$PATH" "$BINARY_NAME" code --version
+  echo ""
   echo "Next: run $TARGET_PATH setup for the interactive TUI setup assistant."
 fi

@@ -2,6 +2,53 @@ import Foundation
 import Testing
 @testable import AccioComputerUseKit
 
+@Test("bare command names are resolved through PATH before runner discovery")
+func bareCommandNameResolvesThroughPath() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let executable = root
+        .appendingPathComponent("Accio Computer Use.app/Contents/MacOS/accio-computer-use")
+    let runner = root
+        .appendingPathComponent("Accio Computer Use.app/Contents/Resources/coding/runner.py")
+    let commandDirectory = root.appendingPathComponent("bin", isDirectory: true)
+    let command = commandDirectory.appendingPathComponent("accio-computer-use")
+    try FileManager.default.createDirectory(
+        at: executable.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try FileManager.default.createDirectory(
+        at: runner.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try FileManager.default.createDirectory(
+        at: commandDirectory,
+        withIntermediateDirectories: true
+    )
+    #expect(FileManager.default.createFile(atPath: executable.path, contents: Data()))
+    #expect(FileManager.default.createFile(atPath: runner.path, contents: Data()))
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: executable.path
+    )
+    try FileManager.default.createSymbolicLink(at: command, withDestinationURL: executable)
+
+    let resolvedExecutable = CodingHarnessLauncher.commandLineExecutableURL(
+        argumentZero: "accio-computer-use",
+        environment: ["PATH": commandDirectory.path]
+    )
+    let resolvedRunner = CodingHarnessLauncher.runnerURL(
+        environment: [:],
+        bundleResourceURL: nil,
+        executableURL: resolvedExecutable,
+        currentDirectoryURL: root.appendingPathComponent("unrelated")
+    )
+
+    #expect(resolvedExecutable == executable)
+    #expect(resolvedRunner == runner)
+}
+
 @Test("coding runner is resolved beside the app-bundled native executable")
 func codingRunnerResolvesFromAppBundleLayout() throws {
     let root = FileManager.default.temporaryDirectory

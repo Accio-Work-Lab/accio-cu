@@ -13,14 +13,11 @@ functions.
 Use Python itself for branching, parsing, local files, APIs, and reusable task
 logic; use the preloaded helpers for desktop observation and interaction.
 
-When the installed integration exposes Accio's coding MCP server, call its
-single `execute` tool with `{"code": "..."}` instead of invoking the command
-through a shell. The Python block, helper API, observation gates, disposable
-worker, and result envelope are the same. Server startup flags own all budgets;
-never attempt to pass timeout, call, memory, output, artifact, or trace limits
-as tool arguments. Start this single-tool hybrid MCP with
-`accio-computer-use code mcp`; the top-level `accio-computer-use mcp` is a
-different, lower-level server that exposes individual desktop tools.
+The coding interface requires the Accio local daemon plus effective
+Accessibility and Screen Recording permissions. The local daemon is CLI
+runtime infrastructure, not a Codex MCP registration. On a new installation or
+after a connectivity failure, run `accio-computer-use doctor` and confirm the
+daemon is running before executing a coding block.
 
 ## Start here
 
@@ -70,6 +67,21 @@ image or other output midway through the same block.
 
 Keep one block focused on one coherent task or recovery attempt. Prefer a
 single coding block over many shell invocations when steps share state.
+
+## Optional MCP integration
+
+Use this section only when the installed integration exposes Accio's coding
+MCP server. Call its single `execute` tool with `{"code": "..."}` instead of
+invoking the command through a shell. The Python block, helper API, observation
+gates, disposable worker, and result envelope are the same. Server startup
+flags own all budgets; never attempt to pass timeout, call, memory, output,
+artifact, or trace limits as tool arguments.
+
+Start the optional single-tool coding MCP with
+`accio-computer-use code mcp`. The top-level `accio-computer-use mcp` is a
+different, lower-level server that exposes individual desktop tools. Do not
+infer that either MCP server is installed merely because the local daemon is
+running.
 
 ## Initial observation gate
 
@@ -344,8 +356,29 @@ already been received.
 ## Diagnostics and fallback
 
 Run `accio-computer-use doctor` when permissions, screenshots, or daemon
-connectivity fail. Run `accio-computer-use code --help` for execution limits and artifact
-options.
+connectivity fail. Run `accio-computer-use code --help` for execution limits
+and artifact options.
+
+If a shell reports that the internal Python runner is missing, resolve the
+installed command through `PATH` and retry the coding smoke test:
+
+```bash
+ACCIO_CLI="$(command -v accio-computer-use)"
+"$ACCIO_CLI" code --version
+```
+
+Do not hardcode a user-specific absolute path in workflows. Use
+`ACCIO_COMPUTER_USE_CODING_RUNNER` only for deliberate source-checkout
+development, not as the normal installed configuration.
+
+If `DaemonUnavailableError` contains `[Errno 1] Operation not permitted`, do
+not restart the daemon. The client command is running in a sandbox that blocks
+Unix socket access. Re-run only the same `accio-computer-use` command outside
+the sandbox, using the shell tool's `sandbox_permissions: "require_escalated"`
+mode when available. Keep the approval scoped to that command; do not disable
+the project sandbox globally, widen filesystem access, or register an MCP
+server as a workaround. If escalation is unavailable, ask the user to run the
+command in a normal Terminal session.
 
 Use the direct CLI only to diagnose one isolated native tool call:
 
