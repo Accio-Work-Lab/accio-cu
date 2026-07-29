@@ -110,11 +110,14 @@ func setupHelpIsRecommendedOnboardingEntry() {
 @Test("doctor help points users to setup for interactive permission work")
 func doctorHelpPointsUsersToSetupForInteractivePermissionWork() {
     let doctorHelp = helpText(command: "doctor")
+    let normalizedDoctorHelp = doctorHelp
+        .split(whereSeparator: \.isWhitespace)
+        .joined(separator: " ")
 
     #expect(doctorHelp.contains("does not open permission prompts"))
     #expect(doctorHelp.contains("accio-computer-use setup"))
     #expect(doctorHelp.contains("standalone CLI has a separate macOS"))
-    #expect(doctorHelp.contains("daemon connectivity"))
+    #expect(normalizedDoctorHelp.contains("daemon connectivity"))
 }
 
 @Test("daemon status help defines live-listener health")
