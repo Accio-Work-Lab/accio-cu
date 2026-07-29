@@ -141,7 +141,7 @@ The core preloaded functions are:
 
 ```text
 list_apps              get_screen_state       get_app_state
-click                  double_click           drag
+click                  double_click           hover                  drag
 perform_secondary_action                      press_key
 scroll                 set_value              type_text
 wait_for_element       menu_select
@@ -206,6 +206,10 @@ emit({"screenshots": result.screenshot_paths})
 
 - Continue in the same block only for a pre-planned sequence or a condition
   Python can determine from `result.text`.
+- Keep coherent form operations such as setting several fields and committing
+  them in one block. Inspect each returned result programmatically, refresh
+  state inside the block only when a selector was replaced, and expose the
+  latest screenshot once at the stage boundary.
 - Use returned AX or `AXDIFF` state as the immediate validity check for a single
   action. At a stage or task boundary, AX is supporting evidence rather than
   completion proof.
@@ -227,7 +231,7 @@ emit({"screenshots": result.screenshot_paths})
 Read only the mechanic relevant to the current task:
 
 - [interaction-skills/observation-and-targeting.md](interaction-skills/observation-and-targeting.md): app versus screen state, stable refs, indices, and snapshot freshness.
-- [interaction-skills/clicking-and-coordinates.md](interaction-skills/clicking-and-coordinates.md): click target modes, coordinate spaces, double-click, and no-change recovery.
+- [interaction-skills/clicking-and-coordinates.md](interaction-skills/clicking-and-coordinates.md): click and hover target modes, coordinate spaces, double-click, and no-change recovery.
 - [interaction-skills/text-and-keyboard.md](interaction-skills/text-and-keyboard.md): choose `type_text` versus `set_value`, commit edits, and key syntax.
 - [interaction-skills/scrolling-and-dragging.md](interaction-skills/scrolling-and-dragging.md): nested scroll regions, virtualized content, and literal drag coordinates.
 - [interaction-skills/menus-and-secondary-actions.md](interaction-skills/menus-and-secondary-actions.md): menu paths, AX actions, activation, and transient context menus.
@@ -261,7 +265,9 @@ the task begins.
 
 Prefer targets in this order:
 
-1. `stable_ref` from the latest daemon-backed state.
+1. `stable_ref` from the latest daemon-backed state, paired with
+   `element_text` when available so a replaced AX node can safely fall back to
+   text matching.
 2. Visible `element_text`; add the latest `element_index` when disambiguation
    helps.
 3. Coordinates read from the latest screenshot.
@@ -271,9 +277,10 @@ application menu bars. Use coordinates for desktop UI, unlabeled visual
 controls, or a transient context menu.
 
 A `stable_ref` may cross snapshots only while the daemon can reconcile the
-same logical element. Removed or replaced elements fail stale instead of being
-retargeted. A supplied `snapshot_id` is a fail-closed precondition; after any
-action, use the new result rather than reusing the prior snapshot ID.
+same logical element. Removed or replaced elements fail stale when used alone;
+when paired with `element_text`, resolution may safely fall back to the current
+matching text element. A supplied `snapshot_id` is a fail-closed precondition;
+after any action, use the new result rather than reusing the prior snapshot ID.
 
 If an action reports `changed=none`, do not blindly repeat it. Re-read the
 returned state and change target or route: stable ref, text, menu path, direct

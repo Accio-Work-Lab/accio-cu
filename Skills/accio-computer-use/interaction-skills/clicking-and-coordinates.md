@@ -9,6 +9,8 @@ click(*, app=None, stable_ref=None, element_index: Optional[str] = None, element
 double_click(*, app=None, stable_ref=None, element_index: Optional[str] = None,
              element_text=None, snapshot_id=None, x=None, y=None,
              coordinate_space=None, mouse_button="left")
+hover(*, app, stable_ref=None, element_index: Optional[str] = None, element_text=None,
+      snapshot_id=None, x=None, y=None, coordinate_space=None)
 ```
 
 ## Parameter semantics
@@ -18,9 +20,11 @@ double_click(*, app=None, stable_ref=None, element_index: Optional[str] = None,
 - `app` is the app name/bundle ID for AX targets and app-screenshot
   coordinates. Omit it only for main-display coordinates from
   `get_screen_state()`.
-- `stable_ref` is the preferred current AX identity. `element_index` is an
-  optional string such as `"12"`, not an integer; it is ephemeral, so pair it
-  with `element_text` to let stale indices fall back to text matching.
+- `stable_ref` is the preferred current AX identity. Pair it with
+  `element_text` when possible so a replaced AX node can safely fall back to
+  text matching. `element_index` is an optional string such as `"12"`, not an
+  integer; it is ephemeral, so pair it with `element_text` to let stale indices
+  fall back to text matching.
   `snapshot_id` is an optional fail-closed precondition from the latest result;
   a superseded or unknown ID raises before `click` refreshes and
   resolves the target.
@@ -29,6 +33,8 @@ double_click(*, app=None, stable_ref=None, element_index: Optional[str] = None,
   `normalized_1`; omission uses the daemon/session default.
 - `click_count` is 1, 2, or 3. `mouse_button` is `left`, `right`, or `middle`.
   `double_click` fixes the count at 2, so it has no `click_count` parameter.
+- `hover` keeps the pointer over the target so hover-driven menus and child
+  content remain available for the next action.
 
 Read the complete parameter definitions in
 [../references/helper-api.md](../references/helper-api.md).
@@ -41,7 +47,7 @@ Prefer AX targets:
 result = click(
     app="TextEdit",
     stable_ref="a12",
-    snapshot_id=current_snapshot_id,
+    element_text="Save",
 )
 ```
 
@@ -76,6 +82,8 @@ AX-snap to an actionable element under the point before falling back to an input
 event. App-level coordinates use the app input fallback directly and do not
 currently AX-snap. Inspect the returned `[Result]` and screenshot. If
 `changed=none`, change target or route instead of repeating the same click.
+If the control may reveal content without activation, use `hover(...)`,
+inspect its returned state, and then target the revealed child.
 
 When a coordinate comes from visual inspection, finish the observation block,
 open its screenshot artifact, then compose a new block with the measured

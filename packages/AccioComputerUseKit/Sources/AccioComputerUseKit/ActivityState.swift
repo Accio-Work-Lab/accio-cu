@@ -142,7 +142,7 @@ public struct ToolActivityDescriptor: Equatable, Sendable {
         case "list_apps": mapping = (.observing, .listApps)
         case "get_app_state": mapping = (.observing, .readApp)
         case "get_screen_state": mapping = (.observing, .readScreen)
-        case "click", "double_click": mapping = (.acting, .click)
+        case "click", "double_click", "hover": mapping = (.acting, .click)
         case "perform_secondary_action": mapping = (.acting, .secondaryAction)
         case "scroll": mapping = (.acting, .scroll)
         case "drag": mapping = (.acting, .drag)

@@ -22,7 +22,7 @@ public enum ToolDefinitions {
         ToolDefinition(
             name: "click",
             description: """
-                Click an element. Prefer stable_ref from the latest daemon/session-backed snapshot/diff when available. Otherwise provide BOTH element_text and element_index for robust targeting — \
+                Click an element. Prefer stable_ref from the latest daemon/session-backed snapshot/diff when available, and pair it with element_text when possible so a replaced AX node can safely fall back to text matching. Otherwise provide BOTH element_text and element_index for robust targeting — \
                 element_text is the stable anchor, element_index is the fast path verified against it. \
                 If element_index is stale (doesn't match element_text), the tool automatically falls back to text search. \
                 Every action tool returns the updated observation + screenshot with a snapshot ID: AXDIFF v1 when daemon/session-backed and safe, otherwise a full AX tree, so you do NOT need a separate get_app_state call after. \
@@ -37,7 +37,7 @@ public enum ToolDefinitions {
             inputSchema: objectSchema(
                 properties: [
                     "app": stringProperty(description: "App name or bundle identifier. Omit to click at screen-level coordinates from get_screen_state"),
-                    "stable_ref": stringProperty(description: "Stable ref from the latest daemon/session-backed AX snapshot/diff, e.g. a12. Preferred over element_index when present"),
+                    "stable_ref": stringProperty(description: "Stable ref from the latest daemon/session-backed AX snapshot/diff, e.g. a12. Pair with element_text to allow safe fallback when the AX node is replaced"),
                     "element_index": stringProperty(description: "Element index from AX tree. Best used together with element_text for cross-validation"),
                     "element_text": stringProperty(description: "Match element by visible label text (case-insensitive substring). Stable across UI changes — always provide this when possible"),
                     "snapshot_id": stringProperty(description: "Optional snapshot precondition. A superseded or unknown ID fails before the action instead of retargeting stale selectors"),
@@ -51,6 +51,30 @@ public enum ToolDefinitions {
                     "mouse_button": stringProperty(description: "left (default), right, middle", enumValues: ["left", "right", "middle"]),
                 ],
                 required: []
+            )
+        ),
+        ToolDefinition(
+            name: "hover",
+            description: """
+                Move the pointer over an app element or app-screenshot coordinate and keep it there. \
+                Use when a control reveals menus, tooltips, or child content on hover. Returns updated observation.
+                """,
+            annotations: actionAnnotations(),
+            inputSchema: objectSchema(
+                properties: [
+                    "app": stringProperty(description: "App name or bundle identifier"),
+                    "stable_ref": stringProperty(description: "Stable ref from the latest app state"),
+                    "element_index": stringProperty(description: "Element index, preferably paired with element_text"),
+                    "element_text": stringProperty(description: "Match element by visible label text"),
+                    "snapshot_id": stringProperty(description: "Optional snapshot precondition; stale IDs fail before the action"),
+                    "x": numberProperty(description: "X coordinate from the latest app screenshot"),
+                    "y": numberProperty(description: "Y coordinate from the latest app screenshot"),
+                    "coordinate_space": stringProperty(
+                        description: "Coordinate system for x/y",
+                        enumValues: ["pixel", "normalized_1000", "normalized_1"]
+                    ),
+                ],
+                required: ["app"]
             )
         ),
         ToolDefinition(

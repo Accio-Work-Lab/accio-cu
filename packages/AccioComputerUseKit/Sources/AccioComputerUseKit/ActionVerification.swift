@@ -259,7 +259,7 @@ enum ActionVerification {
         }
 
         return "⚠ Click may not have taken effect — no UI change detected. " +
-            "The element might not be interactive, or the click may need a different approach."
+            "The element might depend on hover, might not be interactive, or may need a different target."
     }
 
     /// Verify a type_text action by checking the focused element's value.

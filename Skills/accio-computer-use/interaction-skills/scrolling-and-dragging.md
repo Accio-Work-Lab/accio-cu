@@ -51,6 +51,12 @@ Inspect the returned state to confirm content moved. In virtualized lists,
 element identities may change after scrolling; use the new state before the
 next action.
 
+When requested content may be below the fold, scan in bounded page-sized steps
+and inspect each returned state. Stop when the target or end-of-content
+evidence appears, or when two consecutive steps expose the same visible
+anchors. Do not alternate directions unless correcting a clearly overshot
+target.
+
 When the exact off-screen target text is already known and the current view
 offers search or filtering, use that field before attempting scroll. This is
 both more precise and less sensitive to custom-rendered list behavior.

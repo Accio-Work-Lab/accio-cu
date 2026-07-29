@@ -323,7 +323,16 @@ extension ComputerUseService {
 
     func resolveElement(snapshot: AppSnapshot, stableRef: String? = nil, elementIndex: String?, elementText: String?) throws -> ElementRecord {
         if let stableRef {
-            let record = try lookupElementByStableRef(snapshot: snapshot, stableRef: stableRef)
+            let record: ElementRecord
+            do {
+                record = try lookupElementByStableRef(snapshot: snapshot, stableRef: stableRef)
+            } catch {
+                guard !stableRef.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      let elementText else {
+                    throw error
+                }
+                return try lookupElementByText(snapshot: snapshot, text: elementText)
+            }
             if let elementText, !elementMatchesText(record, text: elementText) {
                 throw ComputerUseError.invalidArguments(
                     "stable_ref \(stableRef) resolved to \(elementSummary(for: record)), " +

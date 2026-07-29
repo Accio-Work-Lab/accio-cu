@@ -1274,7 +1274,7 @@ public final class ComputerUseService {
         let toolHint: String
         switch tool {
         case "click":
-            toolHint = "Element may not be interactive — try coordinates or different element_text."
+            toolHint = "Element may depend on hover or a different target — try hover, coordinates, or different element_text."
         case "press_key":
             toolHint = "App may not be receiving keyboard input — try activate_app first, or use click/menu_select."
         case "type_text":

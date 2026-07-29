@@ -107,6 +107,21 @@ enum InputSimulation {
         }
     }
 
+    static func hoverAtScreenPoint(at point: CGPoint) throws {
+        try AutomationPolicy().authorizeToolCall(named: "input")
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            throw ComputerUseError.message("Failed to create HID event source.")
+        }
+        CGWarpMouseCursorPosition(point)
+        try postMouseEvent(
+            type: .mouseMoved,
+            source: source,
+            point: point,
+            button: .left,
+            clickState: 0
+        )
+    }
+
     static func scrollTargeted(at point: CGPoint, direction: String, pages: Double, pid: pid_t, windowNumber: Int? = nil) throws {
         try AutomationPolicy().authorizeToolCall(named: "input")
         // Prepare the window once before the scroll batch
