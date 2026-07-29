@@ -1,3 +1,4 @@
+import errno
 import json
 import os
 import socket
@@ -72,8 +73,7 @@ class DaemonTransport:
                 OSError,
             ) as error:
                 raise DaemonUnavailableError(
-                    "cannot connect to Accio daemon at %s: %s"
-                    % (self.socket_path, error)
+                    _connection_error_message(self.socket_path, error)
                 )
             self._validate_peer(connection)
             connection.settimeout(_remaining(deadline))
@@ -167,3 +167,15 @@ def _remaining(deadline):
     if remaining <= 0:
         raise socket.timeout()
     return remaining
+
+
+def _connection_error_message(socket_path, error):
+    message = "cannot connect to Accio daemon at %s: %s" % (socket_path, error)
+    if getattr(error, "errno", None) in (errno.EPERM, errno.EACCES):
+        message += (
+            ". The client process is blocked from Unix socket access, commonly "
+            "by a command sandbox. Re-run only the accio-computer-use command "
+            "outside that sandbox or with Unix-socket/network access; restarting "
+            "the daemon will not fix this error"
+        )
+    return message

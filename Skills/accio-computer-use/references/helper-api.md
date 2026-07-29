@@ -114,15 +114,16 @@ Parameters:
 Valid target forms:
 
 ```python
-click(app="TextEdit", stable_ref="a12", snapshot_id="...")
+click(app="TextEdit", stable_ref="a12", element_text="Save")
 click(app="TextEdit", element_text="Save")
 click(app="Safari", x=420, y=180)
 click(x=900, y=740)  # screen coordinates from get_screen_state()
 ```
 
-When using an element, provide `stable_ref` first, or use `element_text` with
-the current `element_index` when helpful. Coordinates must come from the latest
-matching app/screen screenshot.
+When using an element, pair `stable_ref` with `element_text` when possible; if
+the AX node is replaced, the current matching text element is used. Otherwise,
+use `element_text` with the current `element_index` when helpful. Coordinates
+must come from the latest matching app/screen screenshot.
 
 ### `double_click`
 
@@ -134,6 +135,14 @@ calls it with `click_count=2`.
 ```python
 double_click(app="Finder", element_text="Documents")
 ```
+
+### `hover`
+
+Signature: `hover(*, app, stable_ref=None, element_index: Optional[str] = None, element_text=None, snapshot_id=None, x=None, y=None, coordinate_space=None)`
+
+Moves the pointer over an app element or coordinate and leaves it there. Use
+this for controls that reveal menus, tooltips, or child content on hover. The
+result contains refreshed app state and a screenshot.
 
 ### `drag`
 

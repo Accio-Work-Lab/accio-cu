@@ -78,3 +78,68 @@ func sessionDefaultReadsEnv() {
     #expect(CoordinateSpace.sessionDefault(environment: ["OPEN_COMPUTER_USE_COORDINATE_SPACE": "normalized_1"]) == .normalized1)
     #expect(CoordinateSpace.sessionDefault(environment: ["ACCIO_COMPUTER_USE_COORDINATE_SPACE": "garbage"]) == .pixel)
 }
+
+@Test("Display selection uses screen-state coordinates and the largest overlap")
+func displaySelectionUsesLargestScreenStateOverlap() {
+    let main = VisualCursorScreenMapping(
+        screenStateFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+        appKitFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+        backingScaleFactor: 2
+    )
+    let secondary = VisualCursorScreenMapping(
+        screenStateFrame: CGRect(x: -216, y: -1080, width: 1920, height: 1080),
+        appKitFrame: CGRect(x: -216, y: 982, width: 1920, height: 1080),
+        backingScaleFactor: 1
+    )
+
+    let selected = screenMapping(
+        withLargestIntersection: CGRect(x: -216, y: -1050, width: 1920, height: 1050),
+        mappings: [main, secondary]
+    )
+
+    #expect(selected == secondary)
+}
+
+@Test("Validated window mapping supports negative secondary-display coordinates")
+func validatedWindowMappingSupportsSecondaryDisplay() {
+    let secondary = VisualCursorScreenMapping(
+        screenStateFrame: CGRect(x: -216, y: -1080, width: 1920, height: 1080),
+        appKitFrame: CGRect(x: -216, y: 982, width: 1920, height: 1080),
+        backingScaleFactor: 1
+    )
+    let windowBounds = CGRect(x: -216, y: -1050, width: 1920, height: 1050)
+
+    let point = validatedScreenStateGlobalPoint(
+        windowPoint: CGPoint(x: 912, y: 622),
+        windowBounds: windowBounds,
+        mappings: [secondary]
+    )
+
+    #expect(point == CGPoint(x: 696, y: -428))
+}
+
+@Test("Validated window mapping rejects points outside the window or displays")
+func validatedWindowMappingRejectsInvalidTargets() {
+    let main = VisualCursorScreenMapping(
+        screenStateFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+        appKitFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+        backingScaleFactor: 2
+    )
+    let windowBounds = CGRect(x: 100, y: 100, width: 800, height: 600)
+
+    #expect(validatedScreenStateGlobalPoint(
+        windowPoint: CGPoint(x: 801, y: 200),
+        windowBounds: windowBounds,
+        mappings: [main]
+    ) == nil)
+    #expect(validatedScreenStateGlobalPoint(
+        windowPoint: CGPoint(x: 800, y: 600),
+        windowBounds: windowBounds,
+        mappings: [main]
+    ) == nil)
+    #expect(validatedScreenStateGlobalPoint(
+        windowPoint: CGPoint(x: 200, y: 200),
+        windowBounds: CGRect(x: 2000, y: 0, width: 800, height: 600),
+        mappings: [main]
+    ) == nil)
+}

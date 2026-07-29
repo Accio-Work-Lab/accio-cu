@@ -50,6 +50,18 @@ func setupAndTUICommandsOpenSetupAssistant() throws {
     #expect(try parseCLI(arguments: ["tui"]) == .setup)
 }
 
+@Test("daemon status accepts an optional socket path")
+func daemonStatusAcceptsOptionalSocketPath() throws {
+    #expect(try parseCLI(arguments: ["daemon-status"]) == .daemonStatus(socketPath: nil))
+    #expect(
+        try parseCLI(arguments: ["daemon-status", "/tmp/accio-test.sock"])
+            == .daemonStatus(socketPath: "/tmp/accio-test.sock")
+    )
+    #expect(throws: CLIError.self) {
+        try parseCLI(arguments: ["daemon-status", "one", "two"])
+    }
+}
+
 @Test("Finder process serial number launches GUI only from an app bundle")
 func finderProcessSerialNumberIsStrictlyScopedToAppLaunch() throws {
     #expect(try parseCLI(
@@ -98,10 +110,23 @@ func setupHelpIsRecommendedOnboardingEntry() {
 @Test("doctor help points users to setup for interactive permission work")
 func doctorHelpPointsUsersToSetupForInteractivePermissionWork() {
     let doctorHelp = helpText(command: "doctor")
+    let normalizedDoctorHelp = doctorHelp
+        .split(whereSeparator: \.isWhitespace)
+        .joined(separator: " ")
 
     #expect(doctorHelp.contains("does not open permission prompts"))
     #expect(doctorHelp.contains("accio-computer-use setup"))
     #expect(doctorHelp.contains("standalone CLI has a separate macOS"))
+    #expect(normalizedDoctorHelp.contains("daemon connectivity"))
+}
+
+@Test("daemon status help defines live-listener health")
+func daemonStatusHelpDefinesLiveListenerHealth() {
+    let daemonHelp = helpText(command: "daemon-status")
+
+    #expect(daemonHelp.contains("live listener"))
+    #expect(daemonHelp.contains("socket file alone is not"))
+    #expect(daemonHelp.contains("Exits nonzero"))
 }
 
 @Test("list-apps help explains Accio is omitted as the host")
@@ -155,6 +180,7 @@ func setupDashboardShowsPermissionsDaemonAndMCPNextSteps() {
     #expect(dashboard.contains("[4] Request Screen Recording permission"))
     #expect(dashboard.contains("[5] Open Screen Recording settings"))
     #expect(dashboard.contains("scripts/install-daemon.sh"))
+    #expect(dashboard.contains("After permissions are effective"))
     #expect(dashboard.contains("✗"))
     #expect(dashboard.contains("✓"))
 }

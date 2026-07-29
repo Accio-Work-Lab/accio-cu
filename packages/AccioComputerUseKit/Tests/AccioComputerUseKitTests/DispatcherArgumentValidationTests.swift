@@ -39,6 +39,17 @@ func dispatcherRejectsExcessiveClickCount() {
     #expect(result.primaryText == "click_count must be between 1 and 3.")
 }
 
+@Test("Dispatcher validates hover targets before resolving the app")
+func dispatcherValidatesHoverTarget() {
+    let dispatcher = ComputerUseToolDispatcher()
+    let result = dispatcher.callToolAsResult(name: "hover", arguments: [
+        "app": "DefinitelyMissingAppForArgumentValidation",
+    ])
+
+    #expect(result.isError)
+    #expect(result.primaryText?.contains("hover requires") == true)
+}
+
 @Test("Dispatcher rejects non-positive scroll pages before action execution")
 func dispatcherRejectsNonPositiveScrollPages() {
     let dispatcher = ComputerUseToolDispatcher()

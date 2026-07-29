@@ -78,7 +78,11 @@ Enable **Accessibility** and **Screen Recording** for **Accio Computer Use** in 
 ```bash
 ./scripts/install-daemon.sh install
 ./scripts/install-daemon.sh status
+accio-computer-use daemon-status
 ```
+
+Both status commands require a live current-user socket listener. A loaded
+LaunchAgent or a leftover socket file is reported as unhealthy.
 
 Restart your agent, then give it a desktop task:
 

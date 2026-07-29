@@ -67,7 +67,9 @@ def click(
     """Click an AX element or screenshot coordinate.
 
     Target with a current stable_ref, visible element_text/index, or x/y from
-    the latest matching screenshot. Omit app for screen-level coordinates.
+    the latest matching screenshot. Pair stable_ref with element_text when
+    possible so a replaced AX node can safely fall back to text matching.
+    Omit app for screen-level coordinates.
     coordinate_space accepts pixel, normalized_1000, or normalized_1.
     snapshot_id is an optional fail-closed precondition from the latest state;
     stale IDs raise before the click.
@@ -106,6 +108,38 @@ def double_click(
         coordinate_space=coordinate_space,
         click_count=2,
         mouse_button=mouse_button,
+    )
+
+
+def hover(
+    *,
+    app,
+    stable_ref=None,
+    element_index: Optional[str] = None,
+    element_text=None,
+    snapshot_id=None,
+    x=None,
+    y=None,
+    coordinate_space=None,
+):
+    """Move the pointer over an app element or app-screenshot coordinate.
+
+    Use this for controls that reveal content on hover. The pointer remains at
+    the target and the returned ToolResult contains refreshed state.
+    """
+
+    return _invoke(
+        "hover",
+        {"app": app},
+        {
+            "stable_ref": stable_ref,
+            "element_index": element_index,
+            "element_text": element_text,
+            "snapshot_id": snapshot_id,
+            "x": x,
+            "y": y,
+            "coordinate_space": coordinate_space,
+        },
     )
 
 
@@ -299,6 +333,7 @@ _HELPERS = {
         get_screen_state,
         get_app_state,
         click,
+        hover,
         drag,
         perform_secondary_action,
         press_key,

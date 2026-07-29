@@ -4,6 +4,7 @@ enum BackgroundScrollStep: Equatable {
     case accessibilityPageAction
     case targetedWheel
     case targetedKeyboard
+    case activationWheel
 }
 
 enum BackgroundScrollPolicy {
@@ -30,6 +31,64 @@ enum BackgroundScrollPolicy {
             result.append(.targetedKeyboard)
         }
 
+        // Escalate to a global HID scroll only after background delivery was
+        // verifiably ineffective. This covers custom-rendered native apps that
+        // do not match the Electron/Qt/Flutter bundle heuristics.
+        if hasScrollablePoint && canVerifyMovement {
+            result.append(.activationWheel)
+        }
+
         return result
     }
+}
+
+enum ScrollContainerPolicy {
+    private static let roles: Set<String> = [
+        "AXScrollArea",
+        "AXTable",
+        "AXOutline",
+        "AXList",
+        "AXCollection",
+    ]
+
+    static func isContainerRole(_ role: String?) -> Bool {
+        role.map(roles.contains) ?? false
+    }
+
+    static func hasScrollAction(_ actions: [String]) -> Bool {
+        actions.contains { $0.hasPrefix("AXScroll") }
+    }
+}
+
+func scrollPositionChanged(before: CGPoint?, after: CGPoint?) -> Bool {
+    guard let before, let after else { return false }
+    return before != after
+}
+
+func oppositeScrollDirection(to direction: String) -> String? {
+    switch direction {
+    case "up": return "down"
+    case "down": return "up"
+    case "left": return "right"
+    case "right": return "left"
+    default: return nil
+    }
+}
+
+func noMovementScrollWarning(direction: String) -> String {
+    guard let opposite = oppositeScrollDirection(to: direction) else {
+        return "⚠ Scroll may not have taken effect — no visible content change detected."
+    }
+    return """
+    ⚠ Scroll may not have taken effect — no visible content change detected. \
+    After visually confirming no movement, retry once with direction="\(opposite)"; \
+    transformed or reverse-ordered containers can expose inverted scroll semantics.
+    """
+}
+
+func scrollStalenessRecoveryMessage(_ message: String, hasStableRef: Bool) -> String {
+    guard hasStableRef, message.contains("stale snapshot_id") else {
+        return message
+    }
+    return message + " Since scrolling is reversible, retry with the same stable_ref and omit snapshot_id; the target will be re-resolved against fresh state."
 }

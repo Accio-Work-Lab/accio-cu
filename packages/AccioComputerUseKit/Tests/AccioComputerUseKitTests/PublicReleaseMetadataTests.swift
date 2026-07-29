@@ -9,7 +9,7 @@ func publicReleaseVersionIsExpected() {
 @Test("desktop action annotations request conservative host approval")
 func desktopActionAnnotationsAreConservative() throws {
     let actions = [
-        "click", "drag", "perform_secondary_action", "press_key",
+        "click", "hover", "drag", "perform_secondary_action", "press_key",
         "scroll", "set_value", "type_text", "menu_select",
     ]
 

@@ -10,6 +10,7 @@ struct VisualCursorTarget: Equatable {
 struct VisualCursorScreenMapping: Equatable {
     let screenStateFrame: CGRect
     let appKitFrame: CGRect
+    let backingScaleFactor: CGFloat
 }
 
 func currentVisualCursorScreenMappings() -> [VisualCursorScreenMapping] {
@@ -20,9 +21,39 @@ func currentVisualCursorScreenMappings() -> [VisualCursorScreenMapping] {
 
         return VisualCursorScreenMapping(
             screenStateFrame: CGDisplayBounds(CGDirectDisplayID(screenNumber.uint32Value)),
-            appKitFrame: screen.frame
+            appKitFrame: screen.frame,
+            backingScaleFactor: screen.backingScaleFactor
         )
     }
+}
+
+func screenMapping(
+    withLargestIntersection bounds: CGRect,
+    mappings: [VisualCursorScreenMapping] = currentVisualCursorScreenMappings()
+) -> VisualCursorScreenMapping? {
+    mappings
+        .map { ($0, $0.screenStateFrame.intersection(bounds)) }
+        .filter { !$0.1.isNull && !$0.1.isEmpty }
+        .max { lhs, rhs in lhs.1.width * lhs.1.height < rhs.1.width * rhs.1.height }?
+        .0
+}
+
+func validatedScreenStateGlobalPoint(
+    windowPoint: CGPoint,
+    windowBounds: CGRect,
+    mappings: [VisualCursorScreenMapping] = currentVisualCursorScreenMappings()
+) -> CGPoint? {
+    let localBounds = CGRect(origin: .zero, size: windowBounds.size)
+    guard localBounds.contains(windowPoint) else { return nil }
+
+    let globalPoint = CGPoint(
+        x: windowBounds.minX + windowPoint.x,
+        y: windowBounds.minY + windowPoint.y
+    )
+    guard mappings.contains(where: { $0.screenStateFrame.contains(globalPoint) }) else {
+        return nil
+    }
+    return globalPoint
 }
 
 func screenStatePointToAppKitGlobalPoint(

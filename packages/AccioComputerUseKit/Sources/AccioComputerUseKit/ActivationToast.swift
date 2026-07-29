@@ -3,6 +3,7 @@ import Foundation
 
 enum ForegroundActivationReason: Sendable {
     case clickFallback
+    case hover
     case scrollFallback
     case dragFallback
     case typing
@@ -15,6 +16,10 @@ enum ForegroundActivationReason: Sendable {
             return chinese
                 ? "点击「\(appName)」需要短暂切换到前台。"
                 : "Clicking \"\(appName)\" requires brief foreground access."
+        case .hover:
+            return chinese
+                ? "悬停「\(appName)」需要短暂切换到前台。"
+                : "Hovering \"\(appName)\" requires brief foreground access."
         case .scrollFallback:
             return chinese
                 ? "滚动「\(appName)」需要短暂切换到前台。"
