@@ -427,8 +427,11 @@ public final class ComputerUseService {
             } else if let x, let y {
                 let inputPoint = CGPoint(x: x, y: y)
                 let pixelPoint = convertToSnapshotPixels(inputPoint, coordinateSpace: coordinateSpace, snapshot: snapshot)
-                let windowPoint = screenshotPixelToWindowPointInSnapshot(snapshot: snapshot, point: pixelPoint)
-                let targetPoint = try windowPointToGlobalPoint(snapshot: snapshot, point: windowPoint)
+                let targetPoint = try screenshotToGlobalPoint(
+                    snapshot: snapshot,
+                    x: pixelPoint.x,
+                    y: pixelPoint.y
+                )
                 let cursorTarget = makeVisualCursorTarget(
                     at: targetPoint,
                     targetWindowID: snapshot.targetWindowID,
@@ -559,7 +562,14 @@ public final class ComputerUseService {
         }
 
         return try preservingFrontmostApp {
-            let snapshot = try snapshotAwareOfStaleness(for: app, snapshotId: snapshotId)
+            let snapshot: AppSnapshot
+            do {
+                snapshot = try snapshotAwareOfStaleness(for: app, snapshotId: snapshotId)
+            } catch let ComputerUseError.stateUnavailable(message) {
+                throw ComputerUseError.stateUnavailable(
+                    scrollStalenessRecoveryMessage(message, hasStableRef: stableRef != nil)
+                )
+            }
             try prepareForForegroundOperationIfNeeded(snapshot: snapshot, reason: .scrollFallback)
             let preFingerprint = structuralFingerprint(snapshot)
             let preState = ActionPreState(pid: snapshot.app.pid, fingerprint: preFingerprint, snapshot: snapshot)
@@ -583,6 +593,7 @@ public final class ComputerUseService {
             let repeatCount = integralScrollPageCount(pages)
             let pageAction = scrollPageAction(for: record, direction: normalized)
             let lineAction = scrollLineAction(for: record, direction: normalized)
+            let positionBefore = record.element.flatMap { deepDescendantPosition(of: $0) }
             let didAttemptScroll: Bool
             do {
                 didAttemptScroll = try performBackgroundScroll(
@@ -609,18 +620,25 @@ public final class ComputerUseService {
             settleVisualCursor(at: cursorTarget)
 
             let afterSnapshot = try refreshSnapshot(for: app)
+            let positionAfter = record.element.flatMap { deepDescendantPosition(of: $0) }
+            let movementConfirmed = scrollPositionChanged(
+                before: positionBefore,
+                after: positionAfter
+            )
             let pagesText = pages == 1 ? "1 page" : "\(pages) pages"
             var summary = "Scrolled \(normalized) \(pagesText) on \(elementSummary(for: record))."
-            summary = ActionResultSummary.line(
+            let actionResult = ActionResultSummary.make(
                 tool: "scroll",
                 target: elementSummary(for: record),
                 route: "background_scroll",
                 preState: preState,
-                postSnapshot: afterSnapshot
-            ) + "\n" + summary
+                postSnapshot: afterSnapshot,
+                changeLevelOverride: movementConfirmed ? .confirmed : nil
+            )
+            summary = actionResult.renderedLine + "\n" + summary
             let postFingerprint = structuralFingerprint(afterSnapshot)
-            if preFingerprint == postFingerprint {
-                summary += "\n⚠ Scroll may not have taken effect — no visible content change detected."
+            if preFingerprint == postFingerprint && !movementConfirmed {
+                summary += "\n" + noMovementScrollWarning(direction: normalized)
             }
             return actionObservationResult(before: snapshot, after: afterSnapshot, actionSummary: summary)
         }
@@ -1259,7 +1277,7 @@ public final class ComputerUseService {
         let toolHint: String
         switch tool {
         case "click":
-            toolHint = "Element may not be interactive — try coordinates or different element_text."
+            toolHint = "Element may depend on hover or a different target — try hover, coordinates, or different element_text."
         case "press_key":
             toolHint = "App may not be receiving keyboard input — try activate_app first, or use click/menu_select."
         case "type_text":

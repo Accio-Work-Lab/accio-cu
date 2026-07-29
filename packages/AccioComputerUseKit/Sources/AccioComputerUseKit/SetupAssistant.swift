@@ -212,6 +212,7 @@ public enum SetupAssistant {
         let title    = "\(styled("Accio setup", colored: interactive, "1")) \(styled("(\(mode))", colored: interactive, "2"))"
         let mcpCmd   = styled("accio-computer-use mcp", colored: interactive, "38;5;44")
         let daemonCmd = styled("scripts/install-daemon.sh", colored: interactive, "38;5;44")
+        let daemonRecovery = styled("scripts/install-daemon.sh install", colored: interactive, "38;5;44")
         let setupCmd = styled("scripts/install-macos.sh --verify --install-skill", colored: interactive, "38;5;44")
 
         return """
@@ -241,7 +242,9 @@ public enum SetupAssistant {
             paused ? "Resume future actions from the menu bar app." : "Pause future actions at any time from the menu bar app.",
             "After Screen Recording changes, restart the menu bar helper.",
             "Agent clients use stdio MCP: \(mcpCmd)",
-            "Persistent service: \(daemonCmd)"
+            dn
+                ? "Persistent service: \(daemonCmd) (healthy)"
+                : "After permissions are effective: \(daemonRecovery)"
           ], colored: interactive))
         """
     }

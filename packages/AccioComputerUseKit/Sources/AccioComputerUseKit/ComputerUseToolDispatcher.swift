@@ -157,6 +157,27 @@ public final class ComputerUseToolDispatcher {
                     mouseButton: optionalString("mouse_button", in: arguments) ?? "left"
                 )
             }
+        case "hover":
+            let hoverX = try optionalDouble("x", in: arguments)
+            let hoverY = try optionalDouble("y", in: arguments)
+            let hasElementTarget = optionalString("stable_ref", in: arguments) != nil
+                || optionalString("element_index", in: arguments) != nil
+                || resolveElementText(in: arguments) != nil
+            guard hasElementTarget || (hoverX != nil && hoverY != nil) else {
+                throw ComputerUseError.invalidArguments(
+                    "hover requires an element target or both x and y coordinates."
+                )
+            }
+            return try service.hover(
+                app: requireString("app", in: arguments),
+                stableRef: optionalString("stable_ref", in: arguments),
+                elementIndex: optionalString("element_index", in: arguments),
+                elementText: resolveElementText(in: arguments),
+                snapshotId: optionalString("snapshot_id", in: arguments),
+                x: hoverX,
+                y: hoverY,
+                coordinateSpace: try requireCoordinateSpace(in: arguments)
+            )
         case "perform_secondary_action":
             return try service.performSecondaryAction(
                 app: requireString("app", in: arguments),
@@ -239,7 +260,7 @@ public final class ComputerUseToolDispatcher {
                 path: try requireStringArray("path", in: arguments)
             )
         default:
-            let known = ["list_apps", "get_app_state", "get_screen_state", "click", "double_click", "scroll", "drag",
+            let known = ["list_apps", "get_app_state", "get_screen_state", "click", "double_click", "hover", "scroll", "drag",
                          "type_text", "press_key", "set_value", "perform_secondary_action", "wait_for_element",
                          "menu_select"]
             throw ComputerUseError.unsupportedTool(name, known: known)

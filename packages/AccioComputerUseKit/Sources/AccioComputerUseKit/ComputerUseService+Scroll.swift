@@ -94,13 +94,17 @@ extension ComputerUseService {
         if requiresActivation {
             if let pageAction, let repeatCount = pageActionRepeatCount, let scrollAnchor {
                 if try performAction(named: pageAction, on: scrollAnchor, availableActions: [pageAction], repeatCount: repeatCount) {
-                    return true
+                    if !canVerifyMovement || scrollDidMove(before: positionBefore, anchor: scrollAnchor) {
+                        return true
+                    }
                 }
             }
             if let lineAction, let scrollAnchor {
                 let repeatCount = max(1, Int((pages * 5).rounded()))
                 if try performAction(named: lineAction, on: scrollAnchor, availableActions: [lineAction], repeatCount: repeatCount) {
-                    return true
+                    if !canVerifyMovement || scrollDidMove(before: positionBefore, anchor: scrollAnchor) {
+                        return true
+                    }
                 }
             }
 
@@ -138,6 +142,17 @@ extension ComputerUseService {
             }
 
             try InputSimulation.scrollViaKeyboard(direction: direction, pages: pages, pid: pid)
+            if canVerifyMovement {
+                if scrollDidMove(before: positionBefore, anchor: scrollAnchor) {
+                    return true
+                }
+                let alreadyActive = (NSWorkspace.shared.frontmostApplication?.processIdentifier == pid)
+                if !alreadyActive {
+                    try InputSimulation.prepareAppForGlobalPointerInput(snapshot.app, reason: .scrollFallback)
+                }
+                try InputSimulation.scrollGlobally(at: eventPoint, direction: direction, pages: pages)
+                skipFocusRestore = true
+            }
             return true
         }
 
@@ -157,7 +172,10 @@ extension ComputerUseService {
                     continue
                 }
                 if try performAction(named: pageAction, on: scrollAnchor, availableActions: [pageAction], repeatCount: repeatCount) {
-                    return true
+                    attempted = true
+                    if !canVerifyMovement || scrollDidMove(before: positionBefore, anchor: scrollAnchor) {
+                        return true
+                    }
                 }
 
             case .targetedWheel:
@@ -184,6 +202,20 @@ extension ComputerUseService {
                 if canVerifyMovement && scrollDidMove(before: positionBefore, anchor: scrollAnchor) {
                     return true
                 }
+                if !canVerifyMovement {
+                    return attempted
+                }
+
+            case .activationWheel:
+                guard let point else { continue }
+                let eventPoint = inputEventPoint(fromScreenStatePoint: point)
+                let alreadyActive = (NSWorkspace.shared.frontmostApplication?.processIdentifier == pid)
+                if !alreadyActive {
+                    try InputSimulation.prepareAppForGlobalPointerInput(snapshot.app, reason: .scrollFallback)
+                }
+                try InputSimulation.scrollGlobally(at: eventPoint, direction: direction, pages: pages)
+                skipFocusRestore = true
+                attempted = true
                 return attempted
             }
         }
@@ -217,15 +249,13 @@ extension ComputerUseService {
     }
 
     func defaultScrollTarget(in snapshot: AppSnapshot) throws -> ElementRecord {
-        let scrollAreas = snapshot.elements.values.filter { $0.role == kAXScrollAreaRole as String }
-        if let best = scrollAreas.max(by: { areaOf($0) < areaOf($1) }) {
-            return best
+        let containers = snapshot.elements.values.filter {
+            ScrollContainerPolicy.isContainerRole($0.role)
         }
-
-        if let scrollable = snapshot.elements.values
-            .filter({ $0.rawActions.contains(where: { $0.hasPrefix("AXScroll") }) })
+        if let best = containers
+            .filter({ ScrollContainerPolicy.hasScrollAction($0.rawActions) })
             .max(by: { areaOf($0) < areaOf($1) }) {
-            return scrollable
+            return best
         }
 
         // Prefer the largest AXWebArea, and skip popup/overlay web areas
@@ -249,6 +279,16 @@ extension ComputerUseService {
             return webArea
         }
 
+        if let best = containers.max(by: { areaOf($0) < areaOf($1) }) {
+            return best
+        }
+
+        if let scrollable = snapshot.elements.values
+            .filter({ ScrollContainerPolicy.hasScrollAction($0.rawActions) })
+            .max(by: { areaOf($0) < areaOf($1) }) {
+            return scrollable
+        }
+
         if let root = snapshot.elements[0] {
             return root
         }
@@ -263,8 +303,8 @@ extension ComputerUseService {
         return frame.width * frame.height
     }
 
-    /// Walk up the AX tree from `element` to find its nearest AXScrollArea ancestor.
-    func ancestorScrollArea(of element: AXUIElement?, in snapshot: AppSnapshot) -> ElementRecord? {
+    /// Walk up the AX tree from `element` to find its nearest scroll container.
+    func ancestorScrollContainer(of element: AXUIElement?, in snapshot: AppSnapshot) -> ElementRecord? {
         guard let element else { return nil }
         var current = element
         for _ in 0..<30 {
@@ -273,7 +313,7 @@ extension ComputerUseService {
             }
             var roleRef: CFTypeRef?
             if AXUIElementCopyAttributeValue(parent, kAXRoleAttribute as CFString, &roleRef) == .success,
-               let role = roleRef as? String, role == kAXScrollAreaRole as String {
+               let role = roleRef as? String, ScrollContainerPolicy.isContainerRole(role) {
                 for record in snapshot.elements.values {
                     if let recordElement = record.element, CFEqual(recordElement, parent) {
                         return record
@@ -323,7 +363,7 @@ extension ComputerUseService {
         let pages = max(ceil(distance / max(windowDimension, 1)), 1)
 
         let scrollTarget: ElementRecord
-        if let ancestorRecord = ancestorScrollArea(of: element, in: snapshot) {
+        if let ancestorRecord = ancestorScrollContainer(of: element, in: snapshot) {
             scrollTarget = ancestorRecord
         } else {
             scrollTarget = try defaultScrollTarget(in: snapshot)
@@ -344,14 +384,47 @@ extension ComputerUseService {
 
         let freshSnapshot = try refreshSnapshot(for: app)
         guard let searchText = elementText else { return nil }
-        guard let resolved = try? lookupElementByText(snapshot: freshSnapshot, text: searchText) else {
-            return nil
-        }
+        let resolved = try? lookupElementByText(snapshot: freshSnapshot, text: searchText)
 
-        if let newFrame = resolved.localFrame, let wb = freshSnapshot.windowBounds {
+        if let resolved, let newFrame = resolved.localFrame, let wb = freshSnapshot.windowBounds {
             let newVisibleRect = CGRect(x: 0, y: 0, width: wb.width, height: wb.height)
             if newVisibleRect.intersects(newFrame) {
                 return resolved
+            }
+        }
+
+        // Reversed and transformed lists can report off-screen frames in the
+        // opposite coordinate order. Refresh the target, then retry once.
+        guard let fallbackDirection = oppositeScrollDirection(to: direction) else {
+            return nil
+        }
+        let fallbackTarget: ElementRecord
+        if let ancestorRecord = ancestorScrollContainer(of: resolved?.element, in: freshSnapshot) {
+            fallbackTarget = ancestorRecord
+        } else {
+            fallbackTarget = try defaultScrollTarget(in: freshSnapshot)
+        }
+        let fallbackPoint = try scrollableGlobalPoint(for: fallbackTarget, snapshot: freshSnapshot)
+        try performBackgroundScroll(
+            at: fallbackPoint,
+            direction: fallbackDirection,
+            pages: pages,
+            pageAction: scrollPageAction(for: fallbackTarget, direction: fallbackDirection),
+            lineAction: scrollLineAction(for: fallbackTarget, direction: fallbackDirection),
+            pageActionRepeatCount: integralScrollPageCount(pages),
+            scrollAnchor: fallbackTarget.element,
+            snapshot: freshSnapshot
+        )
+
+        Thread.sleep(forTimeInterval: 0.2)
+
+        let retrySnapshot = try refreshSnapshot(for: app)
+        if let retryResolved = try? lookupElementByText(snapshot: retrySnapshot, text: searchText),
+           let retryFrame = retryResolved.localFrame,
+           let wb = retrySnapshot.windowBounds {
+            let retryVisibleRect = CGRect(x: 0, y: 0, width: wb.width, height: wb.height)
+            if retryVisibleRect.intersects(retryFrame) {
+                return retryResolved
             }
         }
 

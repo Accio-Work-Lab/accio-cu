@@ -45,6 +45,7 @@ REINSTALL_DAEMON=false
 DAEMON_WAS_LOADED=false
 UPGRADE_DAEMON_STOPPED=false
 UPGRADE_DAEMON_REINSTALLED=false
+DAEMON_RESTART_HEALTHY=true
 DAEMON_LABEL="com.accio.computeruse.daemon"
 DAEMON_PLIST="$HOME/Library/LaunchAgents/$DAEMON_LABEL.plist"
 
@@ -548,8 +549,21 @@ fi
 
 if [[ "$REINSTALL_DAEMON" == true ]]; then
   echo "Migrating existing daemon LaunchAgent to the private socket path..."
-  ACCIO_COMPUTER_USE_BINARY="$TARGET_PATH" "$REPO_ROOT/scripts/install-daemon.sh" install
+  if ACCIO_COMPUTER_USE_BINARY="$TARGET_PATH" "$REPO_ROOT/scripts/install-daemon.sh" install; then
+    echo "Daemon health check passed."
+  else
+    DAEMON_RESTART_HEALTHY=false
+  fi
   UPGRADE_DAEMON_REINSTALLED=true
+  if [[ "$DAEMON_RESTART_HEALTHY" != true ]]; then
+    echo "WARNING: daemon LaunchAgent was reinstalled but is not healthy." >&2
+    if [[ "$PERMISSION_ACTION" == "reset" ]]; then
+      echo "Re-enable Accessibility and Screen Recording, restart the helper, then run:" >&2
+    else
+      echo "Refresh Accessibility and Screen Recording, restart the helper, then run:" >&2
+    fi
+    echo "  $REPO_ROOT/scripts/install-daemon.sh install" >&2
+  fi
 fi
 
 # Warn if a stale binary or symlink elsewhere in PATH would shadow the new one.
@@ -629,6 +643,24 @@ EOF
 if [[ "$VERIFY" == true ]]; then
   echo "Running: $TARGET_PATH doctor"
   "$TARGET_PATH" doctor
+  echo ""
+  if [[ "$REINSTALL_DAEMON" == true ]]; then
+    if [[ "$DAEMON_RESTART_HEALTHY" != true ]]; then
+      echo "Retrying daemon health after installation diagnostics..."
+    fi
+    echo "Running persistent daemon health check..."
+    if ! "$REPO_ROOT/scripts/install-daemon.sh" status; then
+      echo "install-macos.sh: verification failed because the persistent daemon is unhealthy." >&2
+      exit 1
+    fi
+    DAEMON_RESTART_HEALTHY=true
+    echo ""
+  fi
+  echo "Running coding runner smoke test through the installed CLI path..."
+  "$TARGET_PATH" code --version
+  echo ""
+  echo "Running coding runner smoke test through PATH command lookup..."
+  env PATH="$INSTALL_DIR:$PATH" "$BINARY_NAME" code --version
   echo ""
   echo "Next: run $TARGET_PATH setup for the interactive TUI setup assistant."
 fi

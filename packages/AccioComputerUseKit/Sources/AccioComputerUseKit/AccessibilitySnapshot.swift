@@ -706,7 +706,7 @@ struct WindowCapture {
     }
 
     private static func bestEffortScaleFactor(for bounds: CGRect) -> CGFloat {
-        NSScreen.screens.first(where: { $0.frame.intersects(bounds) })?.backingScaleFactor
+        screenMapping(withLargestIntersection: bounds)?.backingScaleFactor
             ?? NSScreen.main?.backingScaleFactor
             ?? 1
     }

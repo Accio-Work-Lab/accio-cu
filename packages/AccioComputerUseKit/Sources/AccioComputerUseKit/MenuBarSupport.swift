@@ -301,6 +301,7 @@ public enum CompanionClipboardText {
     public static let quickCommands = """
     accio-computer-use setup
     accio-computer-use doctor
+    accio-computer-use daemon-status
     accio-computer-use mcp
     accio-computer-use call list_apps
     """

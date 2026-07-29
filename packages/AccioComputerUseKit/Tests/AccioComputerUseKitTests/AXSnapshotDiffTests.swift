@@ -298,6 +298,52 @@ func newLineagesDoNotRecycleStableRefs() throws {
     }
 }
 
+@Test("stale stable refs fall back to text only when a text anchor is provided")
+func staleStableRefsUseExplicitTextFallback() throws {
+    let snapshot = syntheticSnapshot(id: "current", elements: [
+        syntheticElement(index: 0, role: "AXWindow", text: "Main", stableKey: "root"),
+        syntheticElement(index: 1, role: "AXButton", text: "Apply", stableKey: "root/apply"),
+    ])
+    _ = AXSnapshotDiff.applyStableRefs(snapshot: snapshot, previous: nil)
+    let currentRef = try #require(snapshot.elements[1]?.stableRef)
+    let service = ComputerUseService()
+
+    let resolved = try service.resolveElement(
+        snapshot: snapshot,
+        stableRef: "a999",
+        elementIndex: nil,
+        elementText: "Apply"
+    )
+    #expect(resolved.index == 1)
+
+    #expect(throws: ComputerUseError.self) {
+        try service.resolveElement(
+            snapshot: snapshot,
+            stableRef: currentRef,
+            elementIndex: nil,
+            elementText: "Main"
+        )
+    }
+
+    #expect(throws: ComputerUseError.self) {
+        try service.resolveElement(
+            snapshot: snapshot,
+            stableRef: "a999",
+            elementIndex: nil,
+            elementText: nil
+        )
+    }
+
+    #expect(throws: ComputerUseError.self) {
+        try service.resolveElement(
+            snapshot: snapshot,
+            stableRef: "",
+            elementIndex: nil,
+            elementText: "Apply"
+        )
+    }
+}
+
 @Test("subtree projection matches complete ref tokens")
 func subtreeProjectionDoesNotConfuseA1WithA10() {
     let root = syntheticElement(index: 0, role: "AXWindow", text: "Main", stableKey: "root")

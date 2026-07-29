@@ -60,10 +60,32 @@ required input in the background.
 
 ## Transient context menus
 
-An AX tree walk may dismiss an open right-click menu. Use screen-level
-coordinates for the entire transient-menu sequence. This is a three-invocation
-workflow because each screenshot must be inspected by the host/model after its
-coding block exits:
+When the target is present in current AX state, prefer a stable-reference
+sequence. Right-click the target with `app` and `stable_ref`, then immediately
+click the menu item's `stable_ref` from the returned state:
+
+```python
+opened = click(
+    app="Finder",
+    stable_ref="a12",
+    snapshot_id=current_snapshot_id,
+    mouse_button="right",
+)
+emit(opened.screenshot_paths)
+```
+
+After that invocation exits, inspect its returned state and use the menu item's
+current ref in the next invocation without another observation call:
+
+```python
+selected = click(app="Finder", stable_ref="a34")
+```
+
+This avoids coordinate drift and preserves app allowlist verification. If the
+right-click result does not expose the menu in AX state, fall back to
+screen-level coordinates for the entire transient-menu sequence. This is a
+three-invocation workflow because each screenshot must be inspected by the
+host/model after its coding block exits:
 
 1. In an observation block, call `get_screen_state()` and emit its screenshot
    paths. After the block exits, locate the target in the main-display

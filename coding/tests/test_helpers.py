@@ -27,7 +27,7 @@ INTERACTION_SKILL_HELPERS = {
         "get_screen_state",
         "get_app_state",
     ),
-    "clicking-and-coordinates.md": ("click", "double_click"),
+    "clicking-and-coordinates.md": ("click", "double_click", "hover"),
     "text-and-keyboard.md": ("type_text", "set_value", "press_key"),
     "scrolling-and-dragging.md": ("scroll", "drag"),
     "menus-and-secondary-actions.md": (
@@ -51,6 +51,10 @@ EXPECTED_SIGNATURES = {
         "(*, app=None, stable_ref=None, element_index: Optional[str] = None, element_text=None, "
         "snapshot_id=None, x=None, y=None, coordinate_space=None, "
         "mouse_button='left')"
+    ),
+    "hover": (
+        "(*, app, stable_ref=None, element_index: Optional[str] = None, element_text=None, "
+        "snapshot_id=None, x=None, y=None, coordinate_space=None)"
     ),
     "drag": ("(*, from_x, from_y, to_x, to_y, app=None, coordinate_space=None)"),
     "perform_secondary_action": (
@@ -102,6 +106,7 @@ class HelperTests(unittest.TestCase):
         for name in (
             "click",
             "double_click",
+            "hover",
             "perform_secondary_action",
             "scroll",
             "set_value",

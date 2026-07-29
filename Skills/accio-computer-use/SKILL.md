@@ -13,14 +13,13 @@ functions.
 Use Python itself for branching, parsing, local files, APIs, and reusable task
 logic; use the preloaded helpers for desktop observation and interaction.
 
-When the installed integration exposes Accio's coding MCP server, call its
-single `execute` tool with `{"code": "..."}` instead of invoking the command
-through a shell. The Python block, helper API, observation gates, disposable
-worker, and result envelope are the same. Server startup flags own all budgets;
-never attempt to pass timeout, call, memory, output, artifact, or trace limits
-as tool arguments. Start this single-tool hybrid MCP with
-`accio-computer-use code mcp`; the top-level `accio-computer-use mcp` is a
-different, lower-level server that exposes individual desktop tools.
+The coding interface requires the Accio local daemon plus effective
+Accessibility and Screen Recording permissions. The local daemon is CLI
+runtime infrastructure, not a Codex MCP registration. On a new installation or
+after a connectivity failure, run `accio-computer-use doctor`, then require
+`Daemon: running` from `accio-computer-use daemon-status` or a successful
+coding call before executing the task. A loaded LaunchAgent or a socket file
+alone is not daemon-health evidence.
 
 ## Start here
 
@@ -70,6 +69,21 @@ image or other output midway through the same block.
 
 Keep one block focused on one coherent task or recovery attempt. Prefer a
 single coding block over many shell invocations when steps share state.
+
+## Optional MCP integration
+
+Use this section only when the installed integration exposes Accio's coding
+MCP server. Call its single `execute` tool with `{"code": "..."}` instead of
+invoking the command through a shell. The Python block, helper API, observation
+gates, disposable worker, and result envelope are the same. Server startup
+flags own all budgets; never attempt to pass timeout, call, memory, output,
+artifact, or trace limits as tool arguments.
+
+Start the optional single-tool coding MCP with
+`accio-computer-use code mcp`. The top-level `accio-computer-use mcp` is a
+different, lower-level server that exposes individual desktop tools. Do not
+infer that either MCP server is installed merely because the local daemon is
+running.
 
 ## Initial observation gate
 
@@ -127,7 +141,7 @@ The core preloaded functions are:
 
 ```text
 list_apps              get_screen_state       get_app_state
-click                  double_click           drag
+click                  double_click           hover                  drag
 perform_secondary_action                      press_key
 scroll                 set_value              type_text
 wait_for_element       menu_select
@@ -192,6 +206,15 @@ emit({"screenshots": result.screenshot_paths})
 
 - Continue in the same block only for a pre-planned sequence or a condition
   Python can determine from `result.text`.
+- Keep coherent field edits such as filling several related inputs in one
+  block when Python can validate each result. Do not immediately click a
+  Save/Done/Submit control in that same block unless its target is still
+  known to be stable: after edits that may reveal, move, or replace a
+  floating or conditional button, end the block, inspect the latest state or
+  screenshot, then resolve the target from that post-edit state. A
+  `stable_ref` may be reused only when the latest result confirms that it
+  still identifies the same logical control; always refresh an index or
+  coordinate.
 - Use returned AX or `AXDIFF` state as the immediate validity check for a single
   action. At a stage or task boundary, AX is supporting evidence rather than
   completion proof.
@@ -213,7 +236,7 @@ emit({"screenshots": result.screenshot_paths})
 Read only the mechanic relevant to the current task:
 
 - [interaction-skills/observation-and-targeting.md](interaction-skills/observation-and-targeting.md): app versus screen state, stable refs, indices, and snapshot freshness.
-- [interaction-skills/clicking-and-coordinates.md](interaction-skills/clicking-and-coordinates.md): click target modes, coordinate spaces, double-click, and no-change recovery.
+- [interaction-skills/clicking-and-coordinates.md](interaction-skills/clicking-and-coordinates.md): click and hover target modes, coordinate spaces, double-click, and no-change recovery.
 - [interaction-skills/text-and-keyboard.md](interaction-skills/text-and-keyboard.md): choose `type_text` versus `set_value`, commit edits, and key syntax.
 - [interaction-skills/scrolling-and-dragging.md](interaction-skills/scrolling-and-dragging.md): nested scroll regions, virtualized content, and literal drag coordinates.
 - [interaction-skills/menus-and-secondary-actions.md](interaction-skills/menus-and-secondary-actions.md): menu paths, AX actions, activation, and transient context menus.
@@ -247,19 +270,27 @@ the task begins.
 
 Prefer targets in this order:
 
-1. `stable_ref` from the latest daemon-backed state.
+1. `stable_ref` from the latest daemon-backed state, paired with
+   `element_text` when available so a replaced AX node can safely fall back to
+   text matching.
 2. Visible `element_text`; add the latest `element_index` when disambiguation
    helps.
 3. Coordinates read from the latest screenshot.
+
+When a known AX target is outside the latest screenshot, keep the semantic
+target and scroll the intended container in fractional increments. Inspect each
+returned screenshot and resolve the target again before clicking. Use
+untargeted whole-view scrolling only when no nested scroll region is available.
 
 Never reuse an index or coordinate from an older state. Use `menu_select` for
 application menu bars. Use coordinates for desktop UI, unlabeled visual
 controls, or a transient context menu.
 
 A `stable_ref` may cross snapshots only while the daemon can reconcile the
-same logical element. Removed or replaced elements fail stale instead of being
-retargeted. A supplied `snapshot_id` is a fail-closed precondition; after any
-action, use the new result rather than reusing the prior snapshot ID.
+same logical element. Removed or replaced elements fail stale when used alone;
+when paired with `element_text`, resolution may safely fall back to the current
+matching text element. A supplied `snapshot_id` is a fail-closed precondition;
+after any action, use the new result rather than reusing the prior snapshot ID.
 
 If an action reports `changed=none`, do not blindly repeat it. Re-read the
 returned state and change target or route: stable ref, text, menu path, direct
@@ -344,8 +375,37 @@ already been received.
 ## Diagnostics and fallback
 
 Run `accio-computer-use doctor` when permissions, screenshots, or daemon
-connectivity fail. Run `accio-computer-use code --help` for execution limits and artifact
-options.
+connectivity fail. Use `accio-computer-use daemon-status` to verify a live
+current-user listener; `doctor` reports the same connectivity signal alongside
+permission and install diagnostics. Run `accio-computer-use code --help` for
+execution limits and artifact options.
+
+If terminal diagnostics show permissions granted but the persistent daemon is
+unavailable after rebuilding, refresh Accio Computer Use in Accessibility and
+Screen Recording, restart the menu bar helper, then run
+`scripts/install-daemon.sh install`. Verify with `daemon-status`; do not infer
+health from `launchctl print`, a plist, or a socket path alone.
+
+If a shell reports that the internal Python runner is missing, resolve the
+installed command through `PATH` and retry the coding smoke test:
+
+```bash
+ACCIO_CLI="$(command -v accio-computer-use)"
+"$ACCIO_CLI" code --version
+```
+
+Do not hardcode a user-specific absolute path in workflows. Use
+`ACCIO_COMPUTER_USE_CODING_RUNNER` only for deliberate source-checkout
+development, not as the normal installed configuration.
+
+If `DaemonUnavailableError` contains `[Errno 1] Operation not permitted`, do
+not restart the daemon. The client command is running in a sandbox that blocks
+Unix socket access. Re-run only the same `accio-computer-use` command outside
+the sandbox, using the shell tool's `sandbox_permissions: "require_escalated"`
+mode when available. Keep the approval scoped to that command; do not disable
+the project sandbox globally, widen filesystem access, or register an MCP
+server as a workaround. If escalation is unavailable, ask the user to run the
+command in a normal Terminal session.
 
 Use the direct CLI only to diagnose one isolated native tool call:
 
