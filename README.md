@@ -93,6 +93,38 @@ move the three PDF files into it, and verify the final folder contents.
 
 The installed skill handles observation, interaction, and final verification.
 
+### Update an existing installation
+
+After pulling the latest changes, update the CLI and restart its daemon with
+the following steps:
+
+1. Reinstall the app, CLI, and agent skill:
+
+   ```bash
+   ./scripts/install-macos.sh --verify --install-skill
+   ```
+
+2. Manually reconfigure **Accessibility** and **Screen Recording** permissions
+   for **Accio Computer Use** in System Settings → Privacy & Security.
+
+3. Uninstall the existing daemon:
+
+   ```bash
+   ./scripts/install-daemon.sh uninstall
+   ```
+
+4. Install the updated daemon:
+
+   ```bash
+   ./scripts/install-daemon.sh install
+   ```
+
+5. Run setup to verify the system permissions:
+
+   ```bash
+   accio-computer-use setup
+   ```
+
 ## One block, many tools
 
 Pipe Python into `accio-computer-use`; the desktop functions are already loaded:
