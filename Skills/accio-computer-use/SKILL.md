@@ -206,10 +206,15 @@ emit({"screenshots": result.screenshot_paths})
 
 - Continue in the same block only for a pre-planned sequence or a condition
   Python can determine from `result.text`.
-- Keep coherent form operations such as setting several fields and committing
-  them in one block. Inspect each returned result programmatically, refresh
-  state inside the block only when a selector was replaced, and expose the
-  latest screenshot once at the stage boundary.
+- Keep coherent field edits such as filling several related inputs in one
+  block when Python can validate each result. Do not immediately click a
+  Save/Done/Submit control in that same block unless its target is still
+  known to be stable: after edits that may reveal, move, or replace a
+  floating or conditional button, end the block, inspect the latest state or
+  screenshot, then resolve the target from that post-edit state. A
+  `stable_ref` may be reused only when the latest result confirms that it
+  still identifies the same logical control; always refresh an index or
+  coordinate.
 - Use returned AX or `AXDIFF` state as the immediate validity check for a single
   action. At a stage or task boundary, AX is supporting evidence rather than
   completion proof.

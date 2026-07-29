@@ -65,8 +65,15 @@ set_value(app="Safari", element_text="Address", value="https://example.com")
 press_key(app="Safari", key="Return")
 ```
 
-Other apps require clicking Done/Save or moving focus. Verify the field value
-or resulting application state rather than assuming the write persisted.
+Other apps require clicking Done/Save or moving focus. Prefer `Return` or
+another stable commit path when the app accepts it. If you must click a
+Save/Done/Submit control, resolve it from the latest returned state or a fresh
+screenshot after the edit — especially when the button is floating, sticky,
+or only appears after validation. Do not reuse a pre-edit index or coordinate.
+Reuse a `stable_ref` only when the latest result confirms that it still
+identifies the same logical control; otherwise resolve a fresh target. Verify
+the field value or resulting application state rather than assuming the write
+persisted.
 
 ## Key syntax
 
