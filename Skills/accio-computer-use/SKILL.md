@@ -277,6 +277,11 @@ Prefer targets in this order:
    helps.
 3. Coordinates read from the latest screenshot.
 
+When a known AX target is outside the latest screenshot, keep the semantic
+target and scroll the intended container in fractional increments. Inspect each
+returned screenshot and resolve the target again before clicking. Use
+untargeted whole-view scrolling only when no nested scroll region is available.
+
 Never reuse an index or coordinate from an older state. Use `menu_select` for
 application menu bars. Use coordinates for desktop UI, unlabeled visual
 controls, or a transient context menu.

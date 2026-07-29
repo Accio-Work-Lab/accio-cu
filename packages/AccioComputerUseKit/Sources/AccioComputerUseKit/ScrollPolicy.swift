@@ -54,6 +54,10 @@ enum ScrollContainerPolicy {
     static func isContainerRole(_ role: String?) -> Bool {
         role.map(roles.contains) ?? false
     }
+
+    static func hasScrollAction(_ actions: [String]) -> Bool {
+        actions.contains { $0.hasPrefix("AXScroll") }
+    }
 }
 
 func scrollPositionChanged(before: CGPoint?, after: CGPoint?) -> Bool {

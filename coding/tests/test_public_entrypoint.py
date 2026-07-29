@@ -61,6 +61,13 @@ class PublicEntrypointTests(unittest.TestCase):
         self.assertIn("Treat `changed=none` as inconclusive for scrolling", skill)
         self.assertIn("screenshot confirms no movement", skill)
 
+    def test_main_skill_preserves_offscreen_ax_targets_during_scroll_recovery(self):
+        skill = (REPO_ROOT / "Skills" / "accio-computer-use" / "SKILL.md").read_text()
+
+        self.assertIn("known AX target is outside the latest screenshot", skill)
+        self.assertIn("scroll the intended container in fractional increments", skill)
+        self.assertIn("resolve the target again before clicking", skill)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -252,14 +252,10 @@ extension ComputerUseService {
         let containers = snapshot.elements.values.filter {
             ScrollContainerPolicy.isContainerRole($0.role)
         }
-        if let best = containers.max(by: { areaOf($0) < areaOf($1) }) {
-            return best
-        }
-
-        if let scrollable = snapshot.elements.values
-            .filter({ $0.rawActions.contains(where: { $0.hasPrefix("AXScroll") }) })
+        if let best = containers
+            .filter({ ScrollContainerPolicy.hasScrollAction($0.rawActions) })
             .max(by: { areaOf($0) < areaOf($1) }) {
-            return scrollable
+            return best
         }
 
         // Prefer the largest AXWebArea, and skip popup/overlay web areas
@@ -281,6 +277,16 @@ extension ComputerUseService {
             }),
             webArea.role == "AXWebArea" {
             return webArea
+        }
+
+        if let best = containers.max(by: { areaOf($0) < areaOf($1) }) {
+            return best
+        }
+
+        if let scrollable = snapshot.elements.values
+            .filter({ ScrollContainerPolicy.hasScrollAction($0.rawActions) })
+            .max(by: { areaOf($0) < areaOf($1) }) {
+            return scrollable
         }
 
         if let root = snapshot.elements[0] {
