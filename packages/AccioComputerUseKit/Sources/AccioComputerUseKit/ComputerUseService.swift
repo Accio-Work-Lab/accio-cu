@@ -427,8 +427,11 @@ public final class ComputerUseService {
             } else if let x, let y {
                 let inputPoint = CGPoint(x: x, y: y)
                 let pixelPoint = convertToSnapshotPixels(inputPoint, coordinateSpace: coordinateSpace, snapshot: snapshot)
-                let windowPoint = screenshotPixelToWindowPointInSnapshot(snapshot: snapshot, point: pixelPoint)
-                let targetPoint = try windowPointToGlobalPoint(snapshot: snapshot, point: windowPoint)
+                let targetPoint = try screenshotToGlobalPoint(
+                    snapshot: snapshot,
+                    x: pixelPoint.x,
+                    y: pixelPoint.y
+                )
                 let cursorTarget = makeVisualCursorTarget(
                     at: targetPoint,
                     targetWindowID: snapshot.targetWindowID,

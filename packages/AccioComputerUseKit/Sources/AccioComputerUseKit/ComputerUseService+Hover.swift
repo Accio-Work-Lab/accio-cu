@@ -42,11 +42,11 @@ extension ComputerUseService {
                     coordinateSpace: coordinateSpace,
                     snapshot: before
                 )
-                let windowPoint = screenshotPixelToWindowPointInSnapshot(
+                targetPoint = try screenshotToGlobalPoint(
                     snapshot: before,
-                    point: pixelPoint
+                    x: pixelPoint.x,
+                    y: pixelPoint.y
                 )
-                targetPoint = try windowPointToGlobalPoint(snapshot: before, point: windowPoint)
                 targetDescription = "x=\(Int(pixelPoint.x)), y=\(Int(pixelPoint.y))"
             } else {
                 throw ComputerUseError.invalidArguments(

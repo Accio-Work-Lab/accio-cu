@@ -425,13 +425,24 @@ extension ComputerUseService {
     }
 
     func screenshotToGlobalPoint(snapshot: AppSnapshot, x: Double, y: Double) throws -> CGPoint {
-        try windowPointToGlobalPoint(
+        guard let windowBounds = snapshot.windowBounds else {
+            let appReference = snapshot.app.bundleIdentifier ?? snapshot.app.name
+            throw ComputerUseError.stateUnavailable("No window bounds are available for \(appReference). Run get_app_state after bringing the app on screen.")
+        }
+        let windowPoint = screenshotPixelToWindowPointInSnapshot(
             snapshot: snapshot,
-            point: screenshotPixelToWindowPointInSnapshot(
-                snapshot: snapshot,
-                point: CGPoint(x: x, y: y)
-            )
+            point: CGPoint(x: x, y: y)
         )
+        guard let globalPoint = validatedScreenStateGlobalPoint(
+            windowPoint: windowPoint,
+            windowBounds: windowBounds
+        ) else {
+            throw ComputerUseError.invalidArguments(
+                "The screenshot coordinate is outside the target window or all connected displays. " +
+                "Use coordinates from the latest app screenshot and retry."
+            )
+        }
+        return globalPoint
     }
 
     func screenshotPixelToWindowPointInSnapshot(snapshot: AppSnapshot, point: CGPoint) -> CGPoint {
