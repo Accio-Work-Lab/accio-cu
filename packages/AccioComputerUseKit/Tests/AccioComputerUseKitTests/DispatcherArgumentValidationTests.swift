@@ -124,7 +124,7 @@ func dispatcherDefaultsOmittedRepeatedKeyCount() {
     ])
 
     #expect(result.isError)
-    #expect(result.primaryText.hasPrefix("App 'DefinitelyMissingAppForArgumentValidation' not found."))
+    #expect(result.primaryText?.hasPrefix("App 'DefinitelyMissingAppForArgumentValidation' not found.") == true)
 }
 
 @Test("Service rejects invalid repeated key counts before resolving the app", arguments: [
