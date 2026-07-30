@@ -26,6 +26,7 @@ func textMutationPlan(intent: TextMutationIntent, useActivation: Bool) -> TextMu
 // MARK: - Service
 
 public final class ComputerUseService {
+    private let maxKeyPressCount = 100
     private let maxScrollPages = 20.0
     let stableRefsEnabled: Bool
     let actionDiffEnabled: Bool
@@ -804,8 +805,14 @@ public final class ComputerUseService {
         }
     }
 
-    public func pressKey(app: String, key: String) throws -> ToolCallResult {
+    public func pressKey(app: String, key: String, count: Int = 1) throws -> ToolCallResult {
         try AutomationPolicy().authorizeToolCall(named: "press_key")
+        guard count > 0 else {
+            throw ComputerUseError.invalidArguments("count must be a positive integer.")
+        }
+        guard count <= maxKeyPressCount else {
+            throw ComputerUseError.invalidArguments("count must be <= \(maxKeyPressCount).")
+        }
         return try preservingFrontmostApp {
             let beforeSnapshot = try currentSnapshot(for: app)
             try prepareForForegroundOperationIfNeeded(snapshot: beforeSnapshot, reason: .keyboard)
@@ -815,26 +822,33 @@ public final class ComputerUseService {
             let parsed = try KeyPressParser.parse(key)
             let intent = detectKeyIntent(parsed)
 
-            var usedSemanticRoute = false
-
-            switch intent {
-            case .selectAll:
-                usedSemanticRoute = attemptSemanticSelectAll(snapshot: beforeSnapshot)
-            case .rawKey:
-                break
+            let useActivation = needsActivationForInput(beforeSnapshot.app)
+            if useActivation {
+                let alreadyActive = (NSWorkspace.shared.frontmostApplication?.processIdentifier == beforeSnapshot.app.pid)
+                if !alreadyActive {
+                    try InputSimulation.prepareAppForGlobalPointerInput(beforeSnapshot.app, reason: .keyboard)
+                }
+                skipFocusRestore = true
             }
 
-            if !usedSemanticRoute {
-                if needsActivationForInput(beforeSnapshot.app) {
-                    let alreadyActive = (NSWorkspace.shared.frontmostApplication?.processIdentifier == beforeSnapshot.app.pid)
-                    if !alreadyActive {
-                        try InputSimulation.prepareAppForGlobalPointerInput(beforeSnapshot.app, reason: .keyboard)
+            var usedSemanticRoute = false
+            for _ in 0..<count {
+                let usedSemanticPress: Bool
+                switch intent {
+                case .selectAll:
+                    usedSemanticPress = attemptSemanticSelectAll(snapshot: beforeSnapshot)
+                case .rawKey:
+                    usedSemanticPress = false
+                }
+                usedSemanticRoute = usedSemanticRoute || usedSemanticPress
+
+                if !usedSemanticPress {
+                    if useActivation {
+                        try InputSimulation.pressKeyGlobally(key, pid: beforeSnapshot.app.pid, appName: beforeSnapshot.app.name)
+                    } else {
+                        let windowNumber = beforeSnapshot.targetWindowID.map { Int($0) }
+                        try InputSimulation.pressKey(key, pid: beforeSnapshot.app.pid, windowNumber: windowNumber)
                     }
-                    try InputSimulation.pressKeyGlobally(key, pid: beforeSnapshot.app.pid, appName: beforeSnapshot.app.name)
-                    skipFocusRestore = true
-                } else {
-                    let windowNumber = beforeSnapshot.targetWindowID.map { Int($0) }
-                    try InputSimulation.pressKey(key, pid: beforeSnapshot.app.pid, windowNumber: windowNumber)
                 }
             }
 
@@ -854,7 +868,7 @@ public final class ComputerUseService {
                 preState: preState,
                 postSnapshot: afterSnapshot,
                 consecutiveNoChange: consecutiveNoChangeCount(for: appKey)
-            ) + "\nPressed '\(key)' in \(afterSnapshot.app.name)."
+            ) + "\nPressed '\(key)'\(count == 1 ? "" : " \(count) times") in \(afterSnapshot.app.name)."
 
             if usedSemanticRoute {
                 summary += " (via semantic AX route)"

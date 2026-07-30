@@ -194,14 +194,14 @@ def perform_secondary_action(
     )
 
 
-def press_key(*, app, key):
+def press_key(*, app, key, count=1):
     """Send a key or key combination to an app.
 
     Join modifiers with '+', for example Return, super+s, or super+shift+s.
-    Returns refreshed state.
+    count repeats the key within one action and returns one refreshed state.
     """
 
-    return _invoke("press_key", {"app": app, "key": key})
+    return _invoke("press_key", {"app": app, "key": key, "count": count})
 
 
 def scroll(
@@ -217,7 +217,9 @@ def scroll(
     """Scroll an app or a targeted AX region.
 
     direction is up, down, left, or right. pages may be fractional. Target a
-    region with stable_ref or element_text/index. Returns refreshed state.
+    region with stable_ref or element_text/index. pages describes scroll
+    distance, not an item count; never derive a list item's ordinal from it.
+    Returns refreshed state.
     """
 
     return _invoke(

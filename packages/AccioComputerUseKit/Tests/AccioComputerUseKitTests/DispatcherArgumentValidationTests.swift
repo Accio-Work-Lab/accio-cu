@@ -76,6 +76,79 @@ func dispatcherRejectsExcessiveScrollPages() {
     #expect(result.primaryText == "pages must be <= 20.0.")
 }
 
+@Test("Dispatcher rejects invalid repeated key counts before app resolution")
+func dispatcherRejectsInvalidRepeatedKeyCount() {
+    let dispatcher = ComputerUseToolDispatcher()
+    let result = dispatcher.callToolAsResult(name: "press_key", arguments: [
+        "app": "DefinitelyMissingAppForArgumentValidation",
+        "key": "Down",
+        "count": 1.5,
+    ])
+
+    #expect(result.isError)
+    #expect(result.primaryText == "count must be a positive integer.")
+}
+
+@Test("Dispatcher rejects zero repeated key count before app resolution")
+func dispatcherRejectsZeroRepeatedKeyCount() {
+    let dispatcher = ComputerUseToolDispatcher()
+    let result = dispatcher.callToolAsResult(name: "press_key", arguments: [
+        "app": "DefinitelyMissingAppForArgumentValidation",
+        "key": "Down",
+        "count": 0,
+    ])
+
+    #expect(result.isError)
+    #expect(result.primaryText == "count must be a positive integer.")
+}
+
+@Test("Dispatcher rejects repeated key count above the maximum before app resolution")
+func dispatcherRejectsExcessiveRepeatedKeyCount() {
+    let dispatcher = ComputerUseToolDispatcher()
+    let result = dispatcher.callToolAsResult(name: "press_key", arguments: [
+        "app": "DefinitelyMissingAppForArgumentValidation",
+        "key": "Down",
+        "count": 101,
+    ])
+
+    #expect(result.isError)
+    #expect(result.primaryText == "count must be <= 100.")
+}
+
+@Test("Dispatcher accepts omitted repeated key count and uses the default")
+func dispatcherDefaultsOmittedRepeatedKeyCount() {
+    let dispatcher = ComputerUseToolDispatcher()
+    let result = dispatcher.callToolAsResult(name: "press_key", arguments: [
+        "app": "DefinitelyMissingAppForArgumentValidation",
+        "key": "Down",
+    ])
+
+    #expect(result.isError)
+    #expect(result.primaryText.hasPrefix("App 'DefinitelyMissingAppForArgumentValidation' not found."))
+}
+
+@Test("Service rejects invalid repeated key counts before resolving the app", arguments: [
+    (0, "count must be a positive integer."),
+    (-1, "count must be a positive integer."),
+    (101, "count must be <= 100."),
+])
+func serviceRejectsInvalidRepeatedKeyCount(count: Int, expectedMessage: String) {
+    let service = ComputerUseService()
+
+    do {
+        _ = try service.pressKey(
+            app: "DefinitelyMissingAppForArgumentValidation",
+            key: "Down",
+            count: count
+        )
+        Issue.record("Expected pressKey to reject count \(count)")
+    } catch let error as ComputerUseError {
+        #expect(error.errorDescription == expectedMessage)
+    } catch {
+        Issue.record("Unexpected error type: \(error)")
+    }
+}
+
 @Test("Dispatcher rejects unknown declared coordinate spaces before executing")
 func dispatcherRejectsUnknownCoordinateSpace() {
     let dispatcher = ComputerUseToolDispatcher()
