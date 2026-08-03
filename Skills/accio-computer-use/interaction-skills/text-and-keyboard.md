@@ -7,7 +7,7 @@ type_text(*, app, text, stable_ref=None, element_index: Optional[str] = None,
           element_text=None, snapshot_id=None)
 set_value(*, app, value, stable_ref=None, element_index: Optional[str] = None,
           element_text=None, snapshot_id=None)
-press_key(*, app, key)
+press_key(*, app, key, count=1)
 ```
 
 ## Parameter semantics
@@ -21,8 +21,8 @@ press_key(*, app, key)
   `element_index` with `element_text`. `type_text` may omit all target fields to
   use current focus. `set_value` still needs a resolvable element target even
   though its selector parameters default to `None` in Python.
-- `press_key` accepts only `app` and `key`. Encode modifiers inside `key`, such
-  as `super+shift+s`; there is no separate `modifiers` parameter.
+- `press_key` accepts `app`, `key`, and an optional positive `count` up to 100.
+  Encode modifiers inside `key`, such as `super+shift+s`.
 - `set_value(value="")` is rejected by the native boundary. To clear a field,
   target/click it, send `super+a`, then send `backspace`.
 
@@ -82,6 +82,12 @@ Join modifiers with `+`, for example `super+s`, `super+shift+s`, `ctrl+a`, or
 `backspace`, `delete`, `Up`, `Down`, `Home`, `End`, `pageup`, and `pagedown`.
 Both `backspace` and `delete` mean backward delete; use `del` or
 `forwarddelete` for forward delete.
+
+For repeated navigation, send one bounded batch and verify the final selection:
+
+```python
+press_key(app="Finder", key="Down", count=20)
+```
 
 If a shortcut returns no change in Electron/Qt/Flutter apps, use a directly
 targeted click, `menu_select`, or `set_value` before considering activation.

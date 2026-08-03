@@ -61,7 +61,7 @@ EXPECTED_SIGNATURES = {
         "(*, app, action, stable_ref=None, element_index: Optional[str] = None, "
         "element_text=None, snapshot_id=None)"
     ),
-    "press_key": "(*, app, key)",
+    "press_key": "(*, app, key, count=1)",
     "scroll": (
         "(*, app, direction, stable_ref=None, element_index: Optional[str] = None, "
         "element_text=None, snapshot_id=None, pages=1)"
@@ -126,6 +126,18 @@ class HelperTests(unittest.TestCase):
             for name in helper_names:
                 expected = f"{name}{EXPECTED_SIGNATURES[name]}"
                 self.assertIn(expected, normalized, f"{filename}: {name}")
+
+    def test_scroll_contract_does_not_treat_pages_as_item_count(self):
+        doc = inspect.getdoc(helpers.scroll)
+        reference = HELPER_API_REFERENCE.read_text()
+        skill = (
+            SKILL_ROOT / "interaction-skills" / "scrolling-and-dragging.md"
+        ).read_text()
+
+        self.assertIn("not an item count", doc)
+        self.assertIn("number of list items", reference)
+        self.assertIn("do not infer", skill.lower())
+        self.assertIn("independently verified", skill)
 
     def test_main_skill_requires_runtime_discovery_before_guessing(self):
         text = (SKILL_ROOT / "SKILL.md").read_text()
@@ -237,6 +249,20 @@ class HelperTests(unittest.TestCase):
                     "mouse_button": "left",
                 },
             ),
+        )
+
+    def test_press_key_forwards_repeat_count(self):
+        calls = []
+        helpers.configure(
+            lambda name, arguments: calls.append((name, arguments)),
+            [tool_definition("press_key", ["app", "key", "count"], ["app", "key"])],
+        )
+
+        helpers.press_key(app="Finder", key="Down", count=20)
+
+        self.assertEqual(
+            calls,
+            [("press_key", {"app": "Finder", "key": "Down", "count": 20})],
         )
 
     def test_known_schema_drift_fails_before_model_code(self):

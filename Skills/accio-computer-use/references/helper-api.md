@@ -209,12 +209,14 @@ set_value(app="Safari", value="https://example.com", element_text="Address")
 
 ### `press_key`
 
-Signature: `press_key(*, app, key)`
+Signature: `press_key(*, app, key, count=1)`
 
 Parameters:
 
 - `app` (required string): target app.
 - `key` (required string): key or modifier combination.
+- `count` (positive integer, default `1`, maximum `100`): repeat the same key
+  within one action and return one final refreshed state.
 
 Join modifiers with `+`: `super+s`, `super+shift+s`, `ctrl+a`, `option+Down`.
 Special keys include `Return`, `Tab`, `Escape`, `space`, `backspace`, `delete`,
@@ -222,6 +224,7 @@ arrow keys, `Home`, `End`, `pageup`, `pagedown`, and `F1`–`F12`.
 
 ```python
 press_key(app="TextEdit", key="super+s")
+press_key(app="Finder", key="Down", count=20)
 ```
 
 ## Scrolling
@@ -239,9 +242,13 @@ Parameters:
 - `snapshot_id` (optional string): fail-closed precondition; it does not select
   a region.
 - `pages` (positive number, default `1`): amount to scroll; fractional values
-  are allowed, with a native maximum of 20 per call.
+  are allowed, with a native maximum of 20 per call. It is a distance, not a
+  number of list items.
 
 Without an element target, Accio chooses the largest scrollable region.
+
+Do not derive an item's absolute position from `pages`, visible row count, or
+row height. Those signals are not stable in virtualized or transformed lists.
 
 ```python
 scroll(app="Safari", direction="down", pages=0.5)

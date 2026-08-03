@@ -2,6 +2,7 @@ import Foundation
 
 public final class ComputerUseToolDispatcher {
     private let maxClickCount = 3
+    private let maxKeyPressCount = 100
     private let maxScrollPages = 20.0
     private let maxWaitTimeoutSeconds = 30.0
     private let maxWaitPollIntervalSeconds = 2.0
@@ -230,7 +231,12 @@ public final class ComputerUseToolDispatcher {
         case "press_key":
             return try service.pressKey(
                 app: requireString("app", in: arguments),
-                key: requireString("key", in: arguments)
+                key: requireString("key", in: arguments),
+                count: try optionalBoundedPositiveInteger(
+                    "count",
+                    in: arguments,
+                    max: maxKeyPressCount
+                ) ?? 1
             )
         case "set_value":
             return try service.setValue(
@@ -399,6 +405,23 @@ public final class ComputerUseToolDispatcher {
             throw ComputerUseError.invalidArguments("click_count must be between 1 and \(maxClickCount).")
         }
         return count
+    }
+
+    private func optionalBoundedPositiveInteger(
+        _ key: String,
+        in arguments: [String: Any],
+        max maxValue: Int
+    ) throws -> Int? {
+        guard let value = try optionalDouble(key, in: arguments) else {
+            return nil
+        }
+        guard value > 0, value == value.rounded(.towardZero) else {
+            throw ComputerUseError.invalidArguments("\(key) must be a positive integer.")
+        }
+        guard value <= Double(maxValue) else {
+            throw ComputerUseError.invalidArguments("\(key) must be <= \(maxValue).")
+        }
+        return Int(value)
     }
 }
 

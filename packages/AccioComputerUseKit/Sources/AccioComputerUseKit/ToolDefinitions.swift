@@ -152,6 +152,7 @@ public enum ToolDefinitions {
             name: "press_key",
             description: """
                 Press a key or key-combination. Returns updated app state. \
+                Use count to repeat the same key efficiently with one final observation. \
                 Syntax: modifiers joined by '+' then key. \
                 Examples: "Return", "Tab", "space", "super+c", "shift+a", "super+shift+s", "Up", "Escape", "Delete". \
                 Modifiers: cmd/super, shift, option/alt, ctrl.
@@ -161,6 +162,7 @@ public enum ToolDefinitions {
                 properties: [
                     "app": stringProperty(description: "App name or bundle identifier"),
                     "key": stringProperty(description: "Key or combo (e.g. \"Return\", \"super+c\")"),
+                    "count": integerProperty(description: "Number of key presses (default 1, max 100)"),
                 ],
                 required: ["app", "key"]
             )
@@ -169,7 +171,8 @@ public enum ToolDefinitions {
             name: "scroll",
             description: """
                 Scroll within the app. Without stable_ref/element_index/element_text, scrolls the largest scrollable area. \
-                Returns updated observation. Use pages=0.5 for half-page, pages=3 for three pages, etc.
+                Returns updated observation. Use pages=0.5 for half-page, pages=3 for three pages, etc. \
+                pages is a scroll distance, not a number of list items.
                 """,
             annotations: actionAnnotations(),
             inputSchema: objectSchema(
@@ -180,7 +183,7 @@ public enum ToolDefinitions {
                     "element_index": stringProperty(description: "Scroll within this element (optional, best used with element_text)"),
                     "element_text": stringProperty(description: "Scroll within element matching this text (optional)"),
                     "snapshot_id": stringProperty(description: "Optional snapshot precondition; stale IDs fail before the action"),
-                    "pages": numberProperty(description: "Pages to scroll (fractional OK, default 1)"),
+                    "pages": numberProperty(description: "Scroll distance in pages (fractional OK, default 1); not a list-item count"),
                 ],
                 required: ["app", "direction"]
             )

@@ -75,6 +75,21 @@ once: transformed or reverse-ordered containers can expose inverted scroll
 semantics. If that also fails, switch to search, filtering, or direct
 navigation instead of repeating scrolls or dragging a scrollbar speculatively.
 
+## Locate an item by ordinal
+
+When the task names an absolute position such as "the 25th item", do not infer
+it from page count, visible row count, or row height. A page is a scroll
+distance, and virtualized lists may expose a different or stale accessibility
+order.
+
+First establish an ordered source that exposes item positions, such as an
+in-app index, application data/API, or a complete accessible list. Use search
+only after that source identifies the target; a filtered result alone does not
+prove its original position. If no ordered source exists, start from a verified
+boundary and advance with item-level selection semantics while checking the
+selected item after each bounded step. Do not claim an ordinal that cannot be
+independently verified.
+
 ## Drag with literal coordinates
 
 `drag` does not accept an AX target, auto-scroll, or snap endpoints. Both points
