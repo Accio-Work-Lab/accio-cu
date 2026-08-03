@@ -152,24 +152,6 @@ struct ActionResultSummary {
         )
     }
 
-    static func line(
-        tool: String,
-        target: String? = nil,
-        route: String,
-        preState: ActionPreState,
-        postSnapshot: AppSnapshot,
-        consecutiveNoChange: Int? = nil
-    ) -> String {
-        make(
-            tool: tool,
-            target: target,
-            route: route,
-            preState: preState,
-            postSnapshot: postSnapshot,
-            consecutiveNoChange: consecutiveNoChange
-        ).renderedLine
-    }
-
     private static func determineChangeLevel(
         preState: ActionPreState,
         postFingerprint: Int,

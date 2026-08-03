@@ -551,10 +551,10 @@ if [[ "$REINSTALL_DAEMON" == true ]]; then
   echo "Migrating existing daemon LaunchAgent to the private socket path..."
   if ACCIO_COMPUTER_USE_BINARY="$TARGET_PATH" "$REPO_ROOT/scripts/install-daemon.sh" install; then
     echo "Daemon health check passed."
+    UPGRADE_DAEMON_REINSTALLED=true
   else
     DAEMON_RESTART_HEALTHY=false
   fi
-  UPGRADE_DAEMON_REINSTALLED=true
   if [[ "$DAEMON_RESTART_HEALTHY" != true ]]; then
     echo "WARNING: daemon LaunchAgent was reinstalled but is not healthy." >&2
     if [[ "$PERMISSION_ACTION" == "reset" ]]; then
@@ -563,6 +563,7 @@ if [[ "$REINSTALL_DAEMON" == true ]]; then
       echo "Refresh Accessibility and Screen Recording, restart the helper, then run:" >&2
     fi
     echo "  $REPO_ROOT/scripts/install-daemon.sh install" >&2
+    exit 1
   fi
 fi
 

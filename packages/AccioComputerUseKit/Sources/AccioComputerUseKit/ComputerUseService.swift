@@ -368,15 +368,21 @@ public final class ComputerUseService {
                             let afterSnapshot = try refreshSnapshot(for: app)
                             actionRoute = handledAX ? "ax_press" : "coordinate_fallback"
                             actionSummary = "\(clickVerb) \(elementSummary(for: scrolledRecord))\(buttonLabel) (auto-scrolled into view)."
-                            actionSummary = ActionResultSummary.line(
+                            let actionResult = ActionResultSummary.make(
                                 tool: "click",
                                 target: elementSummary(for: scrolledRecord),
                                 route: actionRoute,
                                 preState: preState,
                                 postSnapshot: afterSnapshot
-                            ) + "\n" + actionSummary
+                            )
+                            actionSummary = actionResult.renderedLine + "\n" + actionSummary
                             pulseVisualCursor(at: retryCursorTarget, clickCount: effectiveClickCount, mouseButton: button)
-                            return actionObservationResult(before: snapshot, after: afterSnapshot, actionSummary: actionSummary)
+                            return actionObservationResult(
+                                before: snapshot,
+                                after: afterSnapshot,
+                                actionSummary: actionSummary,
+                                actionMetadata: actionResult.structuredMetadata
+                            )
                         }
 
                         throw ComputerUseError.stateUnavailable(
@@ -468,7 +474,7 @@ public final class ComputerUseService {
             let afterSnapshot = try refreshSnapshot(for: app)
             let postFingerprint = structuralFingerprint(afterSnapshot)
             let appKey = app
-            let resultLine = ActionResultSummary.line(
+            let actionResult = ActionResultSummary.make(
                 tool: "click",
                 target: stableRef ?? elementIndex ?? elementText,
                 route: actionRoute,
@@ -481,7 +487,7 @@ public final class ComputerUseService {
                 || preState.focusedElementValue != ActionPreState(pid: snapshot.app.pid, fingerprint: postFingerprint).focusedElementValue
                 || preState.focusedElementRole != ActionPreState(pid: snapshot.app.pid, fingerprint: postFingerprint).focusedElementRole
             recordActionOutcome(app: appKey, changeLevel: clickChanged ? .confirmed : .none)
-            actionSummary = resultLine + "\n" + actionSummary
+            actionSummary = actionResult.renderedLine + "\n" + actionSummary
             if let warning = ActionVerification.verifyClick(
                 preState: preState, pid: snapshot.app.pid, postFingerprint: postFingerprint
             ) {
@@ -490,7 +496,12 @@ public final class ComputerUseService {
             if let failHint = consecutiveFailureHint(tool: "click", app: appKey) {
                 actionSummary += "\n" + failHint
             }
-            return actionObservationResult(before: snapshot, after: afterSnapshot, actionSummary: actionSummary)
+            return actionObservationResult(
+                before: snapshot,
+                after: afterSnapshot,
+                actionSummary: actionSummary,
+                actionMetadata: actionResult.structuredMetadata
+            )
         }
     }
 
@@ -505,13 +516,19 @@ public final class ComputerUseService {
                 Thread.sleep(forTimeInterval: 0.2)
                 let afterSnapshot = try refreshSnapshot(for: app)
                 let preState = ActionPreState(pid: snapshot.app.pid, fingerprint: structuralFingerprint(snapshot), snapshot: snapshot)
-                let summary = ActionResultSummary.line(
+                let actionResult = ActionResultSummary.make(
                     tool: "perform_secondary_action",
                     route: "activate_app",
                     preState: preState,
                     postSnapshot: afterSnapshot
-                ) + "\nActivated and raised \(afterSnapshot.app.name)."
-                return actionObservationResult(before: snapshot, after: afterSnapshot, actionSummary: summary)
+                )
+                let summary = actionResult.renderedLine + "\nActivated and raised \(afterSnapshot.app.name)."
+                return actionObservationResult(
+                    before: snapshot,
+                    after: afterSnapshot,
+                    actionSummary: summary,
+                    actionMetadata: actionResult.structuredMetadata
+                )
             }
             try prepareForForegroundOperationIfNeeded(snapshot: snapshot, reason: .clickFallback)
             let preState = ActionPreState(pid: snapshot.app.pid, fingerprint: structuralFingerprint(snapshot), snapshot: snapshot)
@@ -537,14 +554,20 @@ public final class ComputerUseService {
 
             waitUntilSettled(pid: snapshot.app.pid, maxWait: 1.0)
             let afterSnapshot = try refreshSnapshot(for: app)
-            let summary = ActionResultSummary.line(
+            let actionResult = ActionResultSummary.make(
                 tool: "perform_secondary_action",
                 target: elementSummary(for: record),
                 route: rawAction,
                 preState: preState,
                 postSnapshot: afterSnapshot
-            ) + "\nPerformed '\(action)' on \(elementSummary(for: record))."
-            return actionObservationResult(before: snapshot, after: afterSnapshot, actionSummary: summary)
+            )
+            let summary = actionResult.renderedLine + "\nPerformed '\(action)' on \(elementSummary(for: record))."
+            return actionObservationResult(
+                before: snapshot,
+                after: afterSnapshot,
+                actionSummary: summary,
+                actionMetadata: actionResult.structuredMetadata
+            )
         }
     }
 
@@ -640,7 +663,12 @@ public final class ComputerUseService {
             if preFingerprint == postFingerprint && !movementConfirmed {
                 summary += "\n" + noMovementScrollWarning(direction: normalized)
             }
-            return actionObservationResult(before: snapshot, after: afterSnapshot, actionSummary: summary)
+            return actionObservationResult(
+                before: snapshot,
+                after: afterSnapshot,
+                actionSummary: summary,
+                actionMetadata: actionResult.structuredMetadata
+            )
         }
     }
 
@@ -682,13 +710,20 @@ public final class ComputerUseService {
             settleVisualCursor(at: endCursorTarget)
             let coordTag = coordinateSpaceTag(for: coordinateSpace, input: CGPoint(x: fromX, y: fromY), pixel: fromPixel)
             let afterSnapshot = try refreshSnapshot(for: app)
-            let summary = ActionResultSummary.line(
+            let actionResult = ActionResultSummary.make(
                 tool: "drag",
                 route: "coordinate_drag",
                 preState: preState,
                 postSnapshot: afterSnapshot
-            ) + "\nDragged from (\(Int(fromPixel.x)), \(Int(fromPixel.y)))\(coordTag) to (\(Int(toPixel.x)), \(Int(toPixel.y)))."
-            return actionObservationResult(before: snapshot, after: afterSnapshot, actionSummary: summary)
+            )
+            let summary = actionResult.renderedLine
+                + "\nDragged from (\(Int(fromPixel.x)), \(Int(fromPixel.y)))\(coordTag) to (\(Int(toPixel.x)), \(Int(toPixel.y)))."
+            return actionObservationResult(
+                before: snapshot,
+                after: afterSnapshot,
+                actionSummary: summary,
+                actionMetadata: actionResult.structuredMetadata
+            )
         }
     }
 
@@ -848,13 +883,14 @@ public final class ComputerUseService {
                 || preState.focusedElementValue != ActionPreState(pid: beforeSnapshot.app.pid, fingerprint: afterFingerprint).focusedElementValue
             recordActionOutcome(app: appKey, changeLevel: changed ? .confirmed : .none)
 
-            var summary = ActionResultSummary.line(
+            let actionResult = ActionResultSummary.make(
                 tool: "press_key",
                 route: keyRoute,
                 preState: preState,
                 postSnapshot: afterSnapshot,
                 consecutiveNoChange: consecutiveNoChangeCount(for: appKey)
-            ) + "\nPressed '\(key)' in \(afterSnapshot.app.name)."
+            )
+            var summary = actionResult.renderedLine + "\nPressed '\(key)' in \(afterSnapshot.app.name)."
 
             if usedSemanticRoute {
                 summary += " (via semantic AX route)"
@@ -870,7 +906,12 @@ public final class ComputerUseService {
                 summary += "\n" + failHint
             }
 
-            return actionObservationResult(before: beforeSnapshot, after: afterSnapshot, actionSummary: summary)
+            return actionObservationResult(
+                before: beforeSnapshot,
+                after: afterSnapshot,
+                actionSummary: summary,
+                actionMetadata: actionResult.structuredMetadata
+            )
         }
     }
 

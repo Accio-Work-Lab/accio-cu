@@ -18,9 +18,10 @@ wait_for_element(*, app, element_text=None, wait_mode="element_text",
   defaults to 0.5 and accepts 0.1–2.0 seconds.
 - A timeout returns a native error result, so the coding harness raises
   `ToolError`; inspect `error.result.text` only inside a bounded recovery path.
-- A successful wait returns matching textual AX state but no screenshot. If the
-  wait reaches a stage/task boundary, follow it with `get_app_state()` to obtain
-  the visual artifact required for verification.
+- A successful wait returns matching textual AX state but no screenshot. At
+  task completion, use the freshest matching screenshot already returned by a
+  mutation; call `get_app_state()` only when no current screenshot shows the
+  result.
 
 Read the complete parameter definitions in
 [../references/helper-api.md](../references/helper-api.md).
@@ -57,23 +58,22 @@ the target or route after a no-change result.
 - `changed=unverifiable`: input was delivered but AX cannot prove the effect.
 - `changed=none`: no detectable effect; do not blindly repeat the action.
 
-## Verify completion independently
+## Verify completion with sufficient evidence
 
-Use AX or `AXDIFF` to validate whether a single step took effect. At a stage or
-task boundary, treat AX as auxiliary evidence and apply this checklist before
-reporting success:
+Use AX or `AXDIFF` to validate whether a single step took effect. Before
+reporting task success, apply this checklist:
 
-1. Expose the latest matching screenshot from the final action or a fresh
-   observation.
-2. End the coding block and inspect that screenshot with the host's image-reading
-   capability. Every completed stage and task requires this visual check.
-3. Use AX values, labels, window titles, and diffs as supporting semantic
+1. State the remaining goal predicate that needs proof.
+2. Use the latest matching screenshot from the final action, or obtain one
+   fresh observation only if the current artifact is stale or insufficient.
+3. End the coding block and inspect that screenshot with the host's
+   image-reading capability.
+4. Use AX values, labels, window titles, and diffs as supporting semantic
    evidence, not as a replacement for the screenshot.
-4. For a persistent outcome, independently read back the durable application,
-   file, or data state. Valid routes include AppleScript or JXA, an application
-   or service API, filesystem inspection, and direct data-state inspection.
-5. Continue investigating whenever visual, AX, and durable-state evidence
-   disagree.
+5. For a persistent outcome, add a durable readback only when the runtime,
+   loaded domain skill, or task context already declares a semantically
+   independent route. Never invent a new integration only for verification.
+6. Continue investigating whenever the available evidence disagrees.
 
-Do not report a stage or task complete from `changed=confirmed`, a matching AX
-value, or a successful helper return alone.
+Do not report a task complete from `changed=confirmed`, a matching AX value, or
+a successful helper return alone.

@@ -28,10 +28,12 @@ UI that has no useful app AX tree.
 ```python
 state = get_app_state(app="TextEdit")
 print(state.text)
-print(state.screenshot_paths)
+emit({"screenshots": state.screenshot_paths})
 ```
 
-Read the state summary, full AX tree, snapshot ID, and screenshot together.
+Read the state summary, full AX tree, and snapshot ID first. Inspect the emitted
+screenshot only when visual layout affects targeting or the semantic state is
+insufficient; emitting a path does not require opening the image in CLI mode.
 Prefer targets in this order:
 
 1. `stable_ref` from the latest daemon-backed state.
@@ -49,20 +51,21 @@ reuse an index, snapshot ID, or coordinate after the UI has changed.
 ```python
 screen = get_screen_state()
 print(screen.text)
-print(screen.screenshot_paths)
+emit({"screenshots": screen.screenshot_paths})
 ```
 
-Screen coordinates belong only to that main-display screenshot. Omit `app`
+Inspect this screenshot because screen-coordinate targeting depends on visible
+layout. Screen coordinates belong only to that main-display screenshot. Omit `app`
 when passing them to `click`, `double_click`, or `drag`. `get_screen_state()`
 does not capture secondary displays; move the target window to the main display
 or use app-level AX/app-screenshot targeting for a window on another display.
 
 ## Avoid redundant observations
 
-Mutating helpers already return refreshed state and screenshots. Inspect that
-result before calling `get_app_state()` again. Re-observe when:
-
-- beginning a new phase or app;
-- the returned state is stale or incomplete;
-- an asynchronous update is still pending;
-- the task requires independent final verification.
+Mutating helpers already return refreshed state and screenshots. Read compact
+feedback first; do not open every returned screenshot or call
+`get_app_state()` again by default. Re-observe only when the current evidence
+cannot resolve the next goal predicate, for example because the app identity
+is not established, returned state is stale or incomplete, or an asynchronous
+update is still pending. At task completion, obtain a new screenshot only when
+the freshest matching artifact is absent, stale, or insufficient.

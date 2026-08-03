@@ -47,14 +47,21 @@ extension ComputerUseService {
 
             waitUntilSettled(pid: snapshot.app.pid, maxWait: 2.0)
             let afterSnapshot = try refreshSnapshot(for: app, readOnly: true)
-            let summary = ActionResultSummary.line(
+            let actionResult = ActionResultSummary.make(
                 tool: "menu_select",
                 target: path.joined(separator: " > "),
                 route: "ax_menu_press",
                 preState: preState,
                 postSnapshot: afterSnapshot
-            ) + "\nSelected menu path: \(trace.joined(separator: " > "))."
-            return actionObservationResult(before: snapshot, after: afterSnapshot, actionSummary: summary)
+            )
+            let summary = actionResult.renderedLine
+                + "\nSelected menu path: \(trace.joined(separator: " > "))."
+            return actionObservationResult(
+                before: snapshot,
+                after: afterSnapshot,
+                actionSummary: summary,
+                actionMetadata: actionResult.structuredMetadata
+            )
         }
     }
 

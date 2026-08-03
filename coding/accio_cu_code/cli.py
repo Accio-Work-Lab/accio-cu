@@ -202,7 +202,13 @@ def _write_error(error_type, message, exit_code, pretty=False):
         "stderr": "",
         "calls": [],
         "last_result": None,
-        "artifacts": {"directory": None, "trace_path": None, "files": []},
+        "execution_feedback": None,
+        "artifacts": {
+            "directory": None,
+            "trace_path": None,
+            "files": [],
+            "sha256": {},
+        },
         "metrics": {"duration_ms": 0, "tool_calls": 0},
         "error": {"type": error_type, "message": message},
     }

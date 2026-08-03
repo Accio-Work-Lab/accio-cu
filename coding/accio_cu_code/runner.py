@@ -17,6 +17,8 @@ from .errors import (
     ExecutionTimeout,
     WorkerProtocolError,
 )
+from .feedback import build_execution_feedback, is_mutating_tool
+from .helpers import validate_runtime_contract
 from .trace import TraceRecorder
 from .transport import DaemonTransport
 from .validation import tool_map, validate_arguments
@@ -68,6 +70,7 @@ def run_code(code, config):
         )
         tools = transport.list_tools(timeout=_operation_timeout(config, started))
         tools_by_name = tool_map(tools)
+        validate_runtime_contract(tools)
         recorder = TraceRecorder(
             config.artifacts_dir,
             full_results=config.full_trace,
@@ -254,15 +257,13 @@ def _handle_call(
     call_index = state.attempted_calls
     call_started = time.monotonic()
     kind = "INVALID"
+    is_mutation = False
     try:
         if not isinstance(tool_name, str) or tool_name not in tools_by_name:
             raise ArgumentValidationError("unknown tool: %r" % tool_name)
         tool = tools_by_name[tool_name]
-        kind = (
-            "OBSERVE"
-            if bool((tool.get("annotations") or {}).get("readOnlyHint"))
-            else "GUI_ACTION"
-        )
+        is_mutation = is_mutating_tool(tool)
+        kind = "GUI_ACTION" if is_mutation else "OBSERVE"
         validate_arguments(tool, arguments)
         raw_result = transport.call_tool(
             tool_name,
@@ -277,6 +278,7 @@ def _handle_call(
             tool=tool_name,
             arguments=arguments,
             duration_ms=duration_ms,
+            is_mutation=is_mutation,
             result=result,
             artifact_paths=artifact_paths,
         )
@@ -291,6 +293,7 @@ def _handle_call(
                 tool=tool_name if isinstance(tool_name, str) else repr(tool_name),
                 arguments=arguments,
                 duration_ms=duration_ms,
+                is_mutation=is_mutation,
                 error=error_payload,
             )
         except BaseException:
@@ -377,10 +380,12 @@ def _kill_process_group(process):
 
 def _envelope(success, value, stdout, stderr, error, recorder, state, started):
     calls = recorder.calls if recorder is not None else []
+    feedback_events = recorder.feedback_events if recorder is not None else []
     artifacts = {
         "directory": str(recorder.directory) if recorder is not None else None,
         "trace_path": str(recorder.trace_path) if recorder is not None else None,
         "files": list(recorder.artifact_paths) if recorder is not None else [],
+        "sha256": dict(recorder.artifact_sha256) if recorder is not None else {},
     }
     last_result = None
     for call in reversed(calls):
@@ -395,6 +400,7 @@ def _envelope(success, value, stdout, stderr, error, recorder, state, started):
         "stderr": stderr or "",
         "calls": calls,
         "last_result": last_result,
+        "execution_feedback": build_execution_feedback(feedback_events),
         "artifacts": artifacts,
         "metrics": {
             "duration_ms": round((time.monotonic() - started) * 1000),

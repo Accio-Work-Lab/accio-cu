@@ -1,4 +1,6 @@
 import json
+import base64
+import hashlib
 from pathlib import Path
 import sys
 import tempfile
@@ -11,6 +13,29 @@ from accio_cu_code.trace import TraceRecorder
 
 
 class TraceRecorderTests(unittest.TestCase):
+    def test_saved_image_records_immutable_integrity_metadata(self):
+        png = b"\x89PNG\r\n\x1a\nintegrity"
+        with tempfile.TemporaryDirectory() as artifacts:
+            recorder = TraceRecorder(artifacts)
+            _, paths = recorder.process_result(
+                {
+                    "content": [
+                        {
+                            "type": "image",
+                            "mimeType": "image/png",
+                            "data": base64.b64encode(png).decode("ascii"),
+                        }
+                    ]
+                },
+                call_index=1,
+            )
+            recorder.close()
+
+        self.assertEqual(
+            recorder.artifact_sha256,
+            {paths[0]: hashlib.sha256(png).hexdigest()},
+        )
+
     def test_result_summary_includes_structured_action_metadata(self):
         with tempfile.TemporaryDirectory() as artifacts:
             recorder = TraceRecorder(artifacts)
@@ -52,6 +77,31 @@ class TraceRecorderTests(unittest.TestCase):
                         "action": {
                             "tool": "type_text",
                             "route": "forged_route",
+                            "changed": "confirmed",
+                        }
+                    },
+                },
+            )
+            recorder.close()
+
+        self.assertNotIn("route", call["result_summary"])
+        self.assertNotIn("changed", call["result_summary"])
+
+    def test_result_summary_rejects_action_metadata_for_another_tool(self):
+        with tempfile.TemporaryDirectory() as artifacts:
+            recorder = TraceRecorder(artifacts)
+            call = recorder.record_call(
+                index=1,
+                kind="GUI_ACTION",
+                tool="click",
+                arguments={"app": "Finder", "element_text": "Documents"},
+                duration_ms=1,
+                result={
+                    "content": [{"type": "text", "text": "done"}],
+                    "structuredContent": {
+                        "action": {
+                            "tool": "type_text",
+                            "route": "keyboard_hid",
                             "changed": "confirmed",
                         }
                     },

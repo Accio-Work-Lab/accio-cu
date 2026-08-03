@@ -3,13 +3,44 @@
 import inspect
 from typing import Optional
 
+try:
+    from .errors import IncompatibleRuntimeError
+except ImportError:  # Loaded by worker.py when it is executed as a file.
+    from errors import IncompatibleRuntimeError
 
-class HelperContractError(RuntimeError):
-    """Raised when the daemon tool schema and the coding API disagree."""
+
+class HelperContractError(IncompatibleRuntimeError):
+    """Raised when one daemon tool disagrees with its Python helper."""
 
 
 _call_tool = None
 _available_tools = frozenset()
+
+_NUMBER_PARAMETERS = frozenset(
+    (
+        "x",
+        "y",
+        "from_x",
+        "from_y",
+        "to_x",
+        "to_y",
+        "pages",
+        "timeout_seconds",
+        "poll_interval",
+    )
+)
+_ENUM_PARAMETERS = {
+    "coordinate_space": ("pixel", "normalized_1000", "normalized_1"),
+    "mouse_button": ("left", "right", "middle"),
+    "direction": ("up", "down", "left", "right"),
+    "wait_mode": (
+        "element_text",
+        "window_title_contains",
+        "element_count_changed",
+        "focused_value_contains",
+    ),
+}
+_NON_SEMANTIC_SCHEMA_KEYS = frozenset(("$comment", "description", "examples", "title"))
 
 
 def _invoke(tool_name, required=None, optional=None):
@@ -363,10 +394,64 @@ def configure(call_tool, tools):
     return exported
 
 
+def validate_runtime_contract(tools):
+    """Reject a daemon that cannot implement the complete coding API."""
+
+    definitions = {
+        tool.get("name"): tool for tool in tools if isinstance(tool, dict)
+    }
+    missing = sorted(set(_HELPERS) - set(definitions))
+    if missing:
+        raise IncompatibleRuntimeError(
+            "connected Accio daemon is incompatible with this coding runner; "
+            "missing required tool(s): %s" % ", ".join(missing)
+        )
+
+    for name, function in _HELPERS.items():
+        try:
+            _validate_signature(name, function, definitions[name])
+        except IncompatibleRuntimeError as error:
+            raise IncompatibleRuntimeError(
+                "connected Accio daemon is incompatible with this coding runner; %s"
+                % error
+            ) from error
+
+
 def _validate_signature(name, function, tool):
-    schema = tool.get("inputSchema") or {}
-    properties = schema.get("properties") or {}
-    required = set(schema.get("required") or [])
+    schema = tool.get("inputSchema")
+    if not isinstance(schema, dict) or schema.get("type") != "object":
+        raise HelperContractError("%s input schema must be an object" % name)
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        raise HelperContractError("%s schema properties must be an object" % name)
+    required_value = schema.get("required", [])
+    if not isinstance(required_value, list) or not all(
+        isinstance(value, str) for value in required_value
+    ):
+        raise HelperContractError("%s schema required must be a string array" % name)
+    if len(required_value) != len(set(required_value)):
+        raise HelperContractError("%s schema required contains duplicates" % name)
+    required = set(required_value)
+    missing_required_properties = sorted(required - set(properties))
+    if missing_required_properties:
+        raise HelperContractError(
+            "%s schema required names are missing from properties: %s"
+            % (name, ", ".join(missing_required_properties))
+        )
+    if schema.get("additionalProperties") is not False:
+        raise HelperContractError(
+            "%s schema must reject additional properties" % name
+        )
+    semantic_top_level_keys = set(schema) - _NON_SEMANTIC_SCHEMA_KEYS
+    unknown_top_level_keys = sorted(
+        semantic_top_level_keys
+        - {"type", "properties", "required", "additionalProperties"}
+    )
+    if unknown_top_level_keys:
+        raise HelperContractError(
+            "%s schema contains unsupported execution constraints: %s"
+            % (name, ", ".join(unknown_top_level_keys))
+        )
     parameters = inspect.signature(function).parameters
     if set(parameters) != set(properties):
         raise HelperContractError(
@@ -383,3 +468,43 @@ def _validate_signature(name, function, tool):
                 "%s.%s required/default status does not match daemon schema"
                 % (name, parameter_name)
             )
+        actual_contract = _property_contract(properties[parameter_name])
+        expected_contract = _expected_property_contract(parameter_name)
+        if actual_contract != expected_contract:
+            raise HelperContractError(
+                "%s.%s schema does not match coding API" % (name, parameter_name)
+            )
+
+
+def _expected_property_contract(parameter_name):
+    if parameter_name == "click_count":
+        return {"type": "integer"}
+    if parameter_name == "path":
+        return {"type": "array", "items": {"type": "string"}}
+    contract = {
+        "type": "number" if parameter_name in _NUMBER_PARAMETERS else "string"
+    }
+    enum_values = _ENUM_PARAMETERS.get(parameter_name)
+    if enum_values is not None:
+        contract["enum"] = enum_values
+    return contract
+
+
+def _property_contract(value):
+    if not isinstance(value, dict) or not isinstance(value.get("type"), str):
+        return None
+    return _normalize_execution_schema(value)
+
+
+def _normalize_execution_schema(value):
+    """Remove documentation fields while preserving every execution constraint."""
+
+    if isinstance(value, dict):
+        return {
+            key: _normalize_execution_schema(item)
+            for key, item in value.items()
+            if key not in _NON_SEMANTIC_SCHEMA_KEYS
+        }
+    if isinstance(value, list):
+        return tuple(_normalize_execution_schema(item) for item in value)
+    return value

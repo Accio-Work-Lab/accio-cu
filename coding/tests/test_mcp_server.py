@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import io
 import json
 import os
@@ -153,6 +154,308 @@ class CodingMCPServerTests(unittest.TestCase):
         self.assertEqual(images[0]["mimeType"], "image/png")
         self.assertEqual(base64.b64decode(images[0]["data"]), png)
         self.assertNotIn(images[0]["data"], result["content"][0]["text"])
+
+    def test_mutation_screenshot_is_attached_without_emit(self):
+        png = b"\x89PNG\r\n\x1a\nautomatic"
+
+        def result_with_image(name, arguments):
+            return {
+                "content": [
+                    {"type": "text", "text": "updated"},
+                    {
+                        "type": "image",
+                        "mimeType": "image/png",
+                        "data": base64.b64encode(png).decode("ascii"),
+                    },
+                ],
+                "isError": False,
+                "structuredContent": {
+                    "state": {"app": "TextEdit", "snapshot_id": "snapshot-2"},
+                    "action": {
+                        "tool": "type_text",
+                        "route": "keyboard_hid",
+                        "changed": "confirmed",
+                    },
+                },
+            }
+
+        with FakeDaemon(result_with_image) as daemon:
+            process = self.run_mcp(
+                [
+                    rpc_request(
+                        1,
+                        "tools/call",
+                        {
+                            "name": "execute",
+                            "arguments": {
+                                "code": 'type_text(app="TextEdit", text="hello")\n'
+                            },
+                        },
+                    )
+                ],
+                daemon.socket_path,
+            )
+
+        self.assertEqual(process.returncode, 0, process.stderr)
+        result = self.parse_responses(process)[0]["result"]
+        images = [item for item in result["content"] if item["type"] == "image"]
+        self.assertEqual(len(images), 1)
+        self.assertEqual(base64.b64decode(images[0]["data"]), png)
+
+    def test_state_only_followup_keeps_available_mutation_image(self):
+        png = b"\x89PNG\r\n\x1a\nmutation"
+
+        def result_with_optional_image(name, arguments):
+            content = [{"type": "text", "text": "state"}]
+            if name == "type_text":
+                content.append(
+                    {
+                        "type": "image",
+                        "mimeType": "image/png",
+                        "data": base64.b64encode(png).decode("ascii"),
+                    }
+                )
+            return {
+                "content": content,
+                "isError": False,
+                "structuredContent": {
+                    "state": {"app": "TextEdit", "snapshot_id": name}
+                },
+            }
+
+        with FakeDaemon(result_with_optional_image) as daemon:
+            process = self.run_mcp(
+                [
+                    rpc_request(
+                        1,
+                        "tools/call",
+                        {
+                            "name": "execute",
+                            "arguments": {
+                                "code": (
+                                    'type_text(app="TextEdit", text="hello")\n'
+                                    'get_app_state(app="TextEdit")\n'
+                                )
+                            },
+                        },
+                    )
+                ],
+                daemon.socket_path,
+            )
+
+        self.assertEqual(process.returncode, 0, process.stderr)
+        result = self.parse_responses(process)[0]["result"]
+        images = [item for item in result["content"] if item["type"] == "image"]
+        self.assertEqual(len(images), 1)
+        self.assertEqual(base64.b64decode(images[0]["data"]), png)
+
+    def test_emitted_and_automatic_screenshot_are_deduplicated(self):
+        png = b"\x89PNG\r\n\x1a\ndeduplicated"
+
+        def result_with_image(name, arguments):
+            return {
+                "content": [
+                    {"type": "text", "text": "updated"},
+                    {
+                        "type": "image",
+                        "mimeType": "image/png",
+                        "data": base64.b64encode(png).decode("ascii"),
+                    },
+                ],
+                "isError": False,
+                "structuredContent": {
+                    "state": {"app": "TextEdit", "snapshot_id": "snapshot-2"}
+                },
+            }
+
+        with FakeDaemon(result_with_image) as daemon:
+            process = self.run_mcp(
+                [
+                    rpc_request(
+                        1,
+                        "tools/call",
+                        {
+                            "name": "execute",
+                            "arguments": {
+                                "code": (
+                                    'result = type_text(app="TextEdit", text="hello")\n'
+                                    "emit(result.screenshot_paths[0])\n"
+                                )
+                            },
+                        },
+                    )
+                ],
+                daemon.socket_path,
+            )
+
+        self.assertEqual(process.returncode, 0, process.stderr)
+        result = self.parse_responses(process)[0]["result"]
+        images = [item for item in result["content"] if item["type"] == "image"]
+        self.assertEqual(len(images), 1)
+        self.assertEqual(base64.b64decode(images[0]["data"]), png)
+
+    def test_modified_artifact_is_not_attached_as_a_trusted_image(self):
+        original = b"\x89PNG\r\n\x1a\noriginal"
+        modified = b"\x89PNG\r\n\x1a\nmodified"
+
+        def result_with_image(name, arguments):
+            return {
+                "content": [
+                    {"type": "text", "text": "updated"},
+                    {
+                        "type": "image",
+                        "mimeType": "image/png",
+                        "data": base64.b64encode(original).decode("ascii"),
+                    },
+                ],
+                "isError": False,
+            }
+
+        with FakeDaemon(result_with_image) as daemon:
+            process = self.run_mcp(
+                [
+                    rpc_request(
+                        1,
+                        "tools/call",
+                        {
+                            "name": "execute",
+                            "arguments": {
+                                "code": (
+                                    'result = type_text(app="TextEdit", text="hello")\n'
+                                    'with open(result.screenshot_paths[0], "wb") as image:\n'
+                                    "    image.write(%r)\n" % modified
+                                )
+                            },
+                        },
+                    )
+                ],
+                daemon.socket_path,
+            )
+
+        self.assertEqual(process.returncode, 0, process.stderr)
+        result = self.parse_responses(process)[0]["result"]
+        images = [item for item in result["content"] if item["type"] == "image"]
+        self.assertEqual(images, [])
+
+    def test_automatic_image_has_a_separate_inline_size_cap(self):
+        png = b"\x89PNG\r\n\x1a\n" + b"x" * 64
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "capture.png"
+            path.write_bytes(png)
+            envelope = {
+                "success": True,
+                "value": None,
+                "execution_feedback": {
+                    "latest_observation": {
+                        "screenshot": {"path": str(path)},
+                        "screenshot_freshness": "after_latest_mutation",
+                    }
+                },
+                "artifacts": {
+                    "files": [str(path)],
+                    "sha256": {str(path): hashlib.sha256(png).hexdigest()},
+                },
+            }
+
+            with mock.patch.object(mcp, "MAX_INLINE_IMAGE_BYTES", 16):
+                result = mcp._tool_result(envelope, max_artifact_bytes=1024)
+
+        images = [item for item in result["content"] if item["type"] == "image"]
+        self.assertEqual(images, [])
+
+    def test_stale_or_unverified_automatic_screenshot_is_not_attached(self):
+        png = b"\x89PNG\r\n\x1a\nstale"
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "capture.png"
+            path.write_bytes(png)
+            for freshness in (
+                "before_latest_mutation",
+                "before_failed_mutation",
+                None,
+                "unknown",
+            ):
+                with self.subTest(freshness=freshness):
+                    envelope = {
+                        "success": True,
+                        "value": None,
+                        "execution_feedback": {
+                            "latest_observation": {
+                                "screenshot": {"path": str(path)},
+                                "screenshot_freshness": freshness,
+                            }
+                        },
+                        "artifacts": {
+                            "files": [str(path)],
+                            "sha256": {
+                                str(path): hashlib.sha256(png).hexdigest()
+                            },
+                        },
+                    }
+
+                    result = mcp._tool_result(envelope, max_artifact_bytes=1024)
+
+                    images = [
+                        item for item in result["content"] if item["type"] == "image"
+                    ]
+                    self.assertEqual(images, [])
+
+    def test_stale_screenshot_is_attached_when_explicitly_emitted(self):
+        png = b"\x89PNG\r\n\x1a\nexplicit"
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "capture.png"
+            path.write_bytes(png)
+            envelope = {
+                "success": True,
+                "value": str(path),
+                "execution_feedback": {
+                    "latest_observation": {
+                        "screenshot": {"path": str(path)},
+                        "screenshot_freshness": "before_latest_mutation",
+                    }
+                },
+                "artifacts": {
+                    "files": [str(path)],
+                    "sha256": {str(path): hashlib.sha256(png).hexdigest()},
+                },
+            }
+
+            result = mcp._tool_result(envelope, max_artifact_bytes=1024)
+
+        images = [item for item in result["content"] if item["type"] == "image"]
+        self.assertEqual(len(images), 1)
+        self.assertEqual(base64.b64decode(images[0]["data"]), png)
+
+    def test_inline_size_cap_is_aggregate_across_emitted_images(self):
+        first = b"\x89PNG\r\n\x1a\nfirst"
+        second = b"\x89PNG\r\n\x1a\nsecond"
+        with tempfile.TemporaryDirectory() as temporary:
+            first_path = Path(temporary) / "first.png"
+            second_path = Path(temporary) / "second.png"
+            first_path.write_bytes(first)
+            second_path.write_bytes(second)
+            envelope = {
+                "success": True,
+                "value": [str(first_path), str(second_path)],
+                "execution_feedback": None,
+                "artifacts": {
+                    "files": [str(first_path), str(second_path)],
+                    "sha256": {
+                        str(first_path): hashlib.sha256(first).hexdigest(),
+                        str(second_path): hashlib.sha256(second).hexdigest(),
+                    },
+                },
+            }
+
+            with mock.patch.object(
+                mcp,
+                "MAX_INLINE_IMAGE_BYTES",
+                len(first) + 1,
+            ):
+                result = mcp._tool_result(envelope, max_artifact_bytes=1024)
+
+        images = [item for item in result["content"] if item["type"] == "image"]
+        self.assertEqual(len(images), 1)
+        self.assertEqual(base64.b64decode(images[0]["data"]), first)
 
     def test_failed_block_is_a_tool_error_with_structured_envelope(self):
         with FakeDaemon() as daemon:
@@ -563,6 +866,9 @@ class CodingMCPServerTests(unittest.TestCase):
         self.assertEqual(len(first_images), 1)
         self.assertEqual(base64.b64decode(first_images[0]["data"]), png)
         self.assertEqual(second_images, [])
+        self.assertIsNone(
+            responses[1]["result"]["structuredContent"]["execution_feedback"]
+        )
 
 
 if __name__ == "__main__":

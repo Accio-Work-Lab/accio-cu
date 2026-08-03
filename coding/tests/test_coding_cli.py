@@ -1,4 +1,5 @@
 import base64
+import inspect
 import json
 import os
 from pathlib import Path
@@ -13,46 +14,75 @@ import unittest
 
 CODING_ROOT = Path(__file__).resolve().parents[1]
 CLI_PATH = CODING_ROOT / "runner.py"
+sys.path.insert(0, str(CODING_ROOT))
+
+from accio_cu_code import helpers
 
 
-TOOLS = [
-    {
-        "name": "get_app_state",
-        "description": "Observe an app.",
-        "annotations": {"readOnlyHint": True},
-        "inputSchema": {
-            "type": "object",
-            "properties": {"app": {"type": "string"}},
-            "required": ["app"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "type_text",
-        "description": "Type text.",
-        "annotations": {},
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "app": {"type": "string"},
-                "text": {"type": "string"},
-                "stable_ref": {"type": "string"},
-                "element_index": {"type": "string"},
-                "element_text": {"type": "string"},
-                "snapshot_id": {"type": "string"},
-            },
-            "required": ["app", "text"],
-            "additionalProperties": False,
-        },
-    },
-]
+READ_ONLY_TOOLS = frozenset(("list_apps", "get_screen_state", "get_app_state"))
+NUMBER_PARAMETERS = frozenset(
+    ("x", "y", "from_x", "from_y", "to_x", "to_y", "pages", "timeout_seconds", "poll_interval")
+)
+ENUM_PARAMETERS = {
+    "coordinate_space": ["pixel", "normalized_1000", "normalized_1"],
+    "mouse_button": ["left", "right", "middle"],
+    "direction": ["up", "down", "left", "right"],
+    "wait_mode": [
+        "element_text",
+        "window_title_contains",
+        "element_count_changed",
+        "focused_value_contains",
+    ],
+}
+
+
+def fixture_property_schema(parameter):
+    if parameter == "click_count":
+        return {"type": "integer"}
+    if parameter == "path":
+        return {"type": "array", "items": {"type": "string"}}
+    schema = {"type": "number" if parameter in NUMBER_PARAMETERS else "string"}
+    if parameter in ENUM_PARAMETERS:
+        schema["enum"] = list(ENUM_PARAMETERS[parameter])
+    return schema
+
+
+def compatible_tools():
+    definitions = []
+    for name, function in helpers._HELPERS.items():
+        parameters = inspect.signature(function).parameters
+        definitions.append(
+            {
+                "name": name,
+                "description": "Fixture for %s." % name,
+                "annotations": {"readOnlyHint": name in READ_ONLY_TOOLS},
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        parameter: fixture_property_schema(parameter)
+                        for parameter in parameters
+                    },
+                    "required": [
+                        parameter
+                        for parameter, definition in parameters.items()
+                        if definition.default is inspect.Parameter.empty
+                    ],
+                    "additionalProperties": False,
+                },
+            }
+        )
+    return definitions
+
+
+TOOLS = compatible_tools()
 
 
 class FakeDaemon:
-    def __init__(self, call_handler=None):
+    def __init__(self, call_handler=None, tools=None):
         self._tempdir = tempfile.TemporaryDirectory()
         self.socket_path = os.path.join(self._tempdir.name, "daemon.sock")
         self.call_handler = call_handler or self._default_call_handler
+        self.tools = list(TOOLS if tools is None else tools)
         self.requests = []
         self._server = None
         self._thread = None
@@ -102,7 +132,7 @@ class FakeDaemon:
     def _response_for(self, request):
         method = request.get("method")
         if method == "tools/list":
-            result = {"tools": TOOLS}
+            result = {"tools": self.tools}
         elif method == "tools/call":
             params = request["params"]
             result = self.call_handler(params["name"], params["arguments"])
@@ -242,6 +272,113 @@ class CodingCLITests(unittest.TestCase):
             redacted = envelope["calls"][0]["arguments"]["text"]
             self.assertTrue(redacted["redacted"])
             self.assertEqual(redacted["length"], 10)
+
+    def test_mutation_exposes_latest_observation_without_an_extra_call(self):
+        png = b"\x89PNG\r\n\x1a\nlatest"
+
+        def result_with_feedback(name, arguments):
+            return {
+                "content": [
+                    {"type": "text", "text": "AXDIFF stays inside ToolResult"},
+                    {
+                        "type": "image",
+                        "mimeType": "image/png",
+                        "data": base64.b64encode(png).decode("ascii"),
+                    },
+                ],
+                "isError": False,
+                "structuredContent": {
+                    "state": {
+                        "app": "TextEdit",
+                        "bundle_id": "com.apple.TextEdit",
+                        "window_title": "Untitled",
+                        "snapshot_id": "snapshot-2",
+                    },
+                    "action": {
+                        "tool": "type_text",
+                        "route": "keyboard_hid",
+                        "changed": "confirmed",
+                    },
+                },
+            }
+
+        with FakeDaemon(result_with_feedback) as daemon:
+            process = self.run_cli(
+                'type_text(app="TextEdit", text="hello")\n',
+                daemon.socket_path,
+            )
+
+        self.assertEqual(process.returncode, 0, process.stderr)
+        envelope = json.loads(process.stdout)
+        feedback = envelope["execution_feedback"]
+        self.assertEqual(feedback["mutations"]["attempted"], 1)
+        self.assertEqual(
+            feedback["latest_observation"]["state"]["snapshot_id"],
+            "snapshot-2",
+        )
+        screenshot_path = feedback["latest_observation"]["screenshot"]["path"]
+        self.assertTrue(Path(screenshot_path).is_file())
+        self.assertNotIn("AXDIFF stays inside ToolResult", process.stdout)
+        self.assertEqual(
+            [request["method"] for request in daemon.requests],
+            ["tools/list", "tools/call"],
+        )
+
+    def test_caught_mutation_error_keeps_feedback(self):
+        def failed_action(name, arguments):
+            return {
+                "content": [{"type": "text", "text": "target became stale"}],
+                "isError": True,
+                "structuredContent": {
+                    "action": {
+                        "tool": "type_text",
+                        "route": "keyboard_hid",
+                        "changed": "unverifiable",
+                    }
+                },
+            }
+
+        with FakeDaemon(failed_action) as daemon:
+            process = self.run_cli(
+                "try:\n"
+                '    type_text(app="TextEdit", text="hello")\n'
+                "except ToolError:\n"
+                '    emit("recovered")\n',
+                daemon.socket_path,
+            )
+
+        self.assertEqual(process.returncode, 0, process.stderr)
+        envelope = json.loads(process.stdout)
+        self.assertTrue(envelope["success"])
+        self.assertEqual(envelope["value"], "recovered")
+        self.assertEqual(envelope["execution_feedback"]["mutations"]["failed"], 1)
+        self.assertEqual(
+            [item["kind"] for item in envelope["execution_feedback"]["notifications"]],
+            ["action_error", "unverifiable", "screenshot_unavailable"],
+        )
+
+    def test_uncaught_mutation_error_keeps_feedback(self):
+        def failed_action(name, arguments):
+            return {
+                "content": [{"type": "text", "text": "delivery failed"}],
+                "isError": True,
+            }
+
+        with FakeDaemon(failed_action) as daemon:
+            process = self.run_cli(
+                'type_text(app="TextEdit", text="hello")\n',
+                daemon.socket_path,
+            )
+
+        self.assertNotEqual(process.returncode, 0)
+        envelope = json.loads(process.stdout)
+        self.assertFalse(envelope["success"])
+        self.assertEqual(envelope["error"]["type"], "ToolError")
+        self.assertEqual(envelope["execution_feedback"]["mutations"]["failed"], 1)
+        self.assertEqual(
+            [item["kind"] for item in envelope["execution_feedback"]["notifications"]],
+            ["action_error", "screenshot_unavailable"],
+        )
 
     def test_default_trace_does_not_persist_full_result_text(self):
         def result_with_secret(name, arguments):
@@ -423,6 +560,78 @@ class CodingCLITests(unittest.TestCase):
         self.assertFalse(envelope["success"])
         self.assertEqual(envelope["error"]["type"], "DaemonUnavailableError")
         self.assertNotIn("never runs", envelope["stdout"])
+
+    def test_incompatible_daemon_fails_before_model_code_runs(self):
+        stale_tools = [tool for tool in TOOLS if tool["name"] != "hover"]
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "model-code-ran"
+            with FakeDaemon(tools=stale_tools) as daemon:
+                process = self.run_cli(
+                    "from pathlib import Path\nPath(%r).write_text('ran')\n"
+                    % str(marker),
+                    daemon.socket_path,
+                )
+
+            envelope = json.loads(process.stdout)
+            self.assertNotEqual(process.returncode, 0)
+            self.assertFalse(envelope["success"])
+            self.assertEqual(envelope["error"]["type"], "IncompatibleRuntimeError")
+            self.assertIn("missing required tool(s): hover", envelope["error"]["message"])
+            self.assertFalse(marker.exists())
+            self.assertEqual(envelope["calls"], [])
+            self.assertEqual(envelope["metrics"]["tool_calls"], 0)
+            self.assertIsNone(envelope["artifacts"]["trace_path"])
+            self.assertEqual(
+                [request["method"] for request in daemon.requests],
+                ["tools/list"],
+            )
+
+    def test_incompatible_daemon_reports_schema_drift_before_execution(self):
+        drifted_tools = compatible_tools()
+        get_app_state = next(
+            tool for tool in drifted_tools if tool["name"] == "get_app_state"
+        )
+        get_app_state["inputSchema"]["properties"] = {
+            "application": {"type": "string"}
+        }
+        get_app_state["inputSchema"]["required"] = ["application"]
+
+        with FakeDaemon(tools=drifted_tools) as daemon:
+            process = self.run_cli("print('never runs')\n", daemon.socket_path)
+
+        envelope = json.loads(process.stdout)
+        self.assertNotEqual(process.returncode, 0)
+        self.assertEqual(envelope["error"]["type"], "IncompatibleRuntimeError")
+        self.assertIn("get_app_state", envelope["error"]["message"])
+        self.assertIn("parameters do not match", envelope["error"]["message"])
+        self.assertNotIn("never runs", envelope["stdout"])
+        self.assertEqual(
+            [request["method"] for request in daemon.requests],
+            ["tools/list"],
+        )
+
+    def test_incompatible_daemon_rejects_semantic_schema_drift(self):
+        drifted_tools = compatible_tools()
+        click = next(tool for tool in drifted_tools if tool["name"] == "click")
+        click["inputSchema"]["properties"]["x"] = {"type": "string"}
+        click["inputSchema"]["additionalProperties"] = True
+
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "model-code-ran"
+            with FakeDaemon(tools=drifted_tools) as daemon:
+                process = self.run_cli(
+                    "from pathlib import Path\nPath(%r).write_text('ran')\n"
+                    % str(marker),
+                    daemon.socket_path,
+                )
+
+            envelope = json.loads(process.stdout)
+            self.assertNotEqual(process.returncode, 0)
+            self.assertEqual(envelope["error"]["type"], "IncompatibleRuntimeError")
+            self.assertIn("click", envelope["error"]["message"])
+            self.assertIn("schema", envelope["error"]["message"])
+            self.assertFalse(marker.exists())
+            self.assertEqual([item["method"] for item in daemon.requests], ["tools/list"])
 
     def test_insecure_socket_permissions_are_rejected(self):
         with FakeDaemon() as daemon:

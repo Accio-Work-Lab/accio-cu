@@ -10,6 +10,10 @@ class DaemonProtocolError(CodingHarnessError):
     pass
 
 
+class IncompatibleRuntimeError(CodingHarnessError):
+    pass
+
+
 class ResponseTooLargeError(CodingHarnessError):
     pass
 

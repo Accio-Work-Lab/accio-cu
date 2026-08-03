@@ -1,6 +1,8 @@
 """Stdio MCP entry point for the Accio Computer Use coding harness."""
 
 import base64
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -15,6 +17,7 @@ SERVER_NAME = "accio-computer-use"
 TOOL_NAME = "execute"
 MAX_CODE_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
+MAX_INLINE_IMAGE_BYTES = 32 * 1024 * 1024
 
 
 TOOL_DEFINITION = {
@@ -211,16 +214,32 @@ def _emitted_images(envelope, max_artifact_bytes):
     if not isinstance(artifacts, dict) or not isinstance(artifacts.get("files"), list):
         return []
     trusted_paths = {path for path in artifacts["files"] if isinstance(path, str)}
+    artifact_sha256 = artifacts.get("sha256")
+    artifact_sha256 = artifact_sha256 if isinstance(artifact_sha256, dict) else {}
     referenced_paths = _collect_strings(envelope.get("value"))
+    automatic_path = _automatic_screenshot_path(envelope)
+    if automatic_path is not None:
+        referenced_paths.append(automatic_path)
     images = []
     seen = set()
+    remaining_bytes = min(max_artifact_bytes, MAX_INLINE_IMAGE_BYTES)
     for path in referenced_paths:
+        if remaining_bytes < 8:
+            break
         if path in seen or path not in trusted_paths or not path.lower().endswith(".png"):
             continue
         seen.add(path)
-        image_bytes = _read_png(path, max_artifact_bytes)
+        expected_sha256 = artifact_sha256.get(path)
+        if not isinstance(expected_sha256, str):
+            continue
+        image_bytes = _read_png(
+            path,
+            remaining_bytes,
+            expected_sha256,
+        )
         if image_bytes is None:
             continue
+        remaining_bytes -= len(image_bytes)
         images.append(
             {
                 "type": "image",
@@ -229,6 +248,22 @@ def _emitted_images(envelope, max_artifact_bytes):
             }
         )
     return images
+
+
+def _automatic_screenshot_path(envelope):
+    feedback = envelope.get("execution_feedback")
+    if not isinstance(feedback, dict):
+        return None
+    observation = feedback.get("latest_observation")
+    if not isinstance(observation, dict):
+        return None
+    if observation.get("screenshot_freshness") != "after_latest_mutation":
+        return None
+    screenshot = observation.get("screenshot")
+    if not isinstance(screenshot, dict):
+        return None
+    path = screenshot.get("path")
+    return path if isinstance(path, str) else None
 
 
 def _collect_strings(value):
@@ -247,7 +282,7 @@ def _collect_strings(value):
     return []
 
 
-def _read_png(path, max_bytes):
+def _read_png(path, max_bytes, expected_sha256):
     descriptor = None
     try:
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
@@ -265,6 +300,9 @@ def _read_png(path, max_bytes):
             data.extend(chunk)
         image_bytes = bytes(data)
         if len(image_bytes) > max_bytes or not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            return None
+        actual_sha256 = hashlib.sha256(image_bytes).hexdigest()
+        if not hmac.compare_digest(actual_sha256, expected_sha256):
             return None
         return image_bytes
     except (OSError, ValueError, TypeError):
@@ -299,7 +337,13 @@ def _error_envelope(error_type, message):
         "stderr": "",
         "calls": [],
         "last_result": None,
-        "artifacts": {"directory": None, "trace_path": None, "files": []},
+        "execution_feedback": None,
+        "artifacts": {
+            "directory": None,
+            "trace_path": None,
+            "files": [],
+            "sha256": {},
+        },
         "metrics": {"duration_ms": 0, "tool_calls": 0},
         "error": {"type": error_type, "message": message},
     }

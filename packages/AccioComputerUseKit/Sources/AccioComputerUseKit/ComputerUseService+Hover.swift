@@ -65,14 +65,20 @@ extension ComputerUseService {
                 fingerprint: structuralFingerprint(before),
                 snapshot: before
             )
-            let summary = ActionResultSummary.line(
+            let actionResult = ActionResultSummary.make(
                 tool: "hover",
                 target: targetDescription,
                 route: "global_pointer",
                 preState: preState,
                 postSnapshot: after
-            ) + "\nHovered \(targetDescription)."
-            return actionObservationResult(before: before, after: after, actionSummary: summary)
+            )
+            let summary = actionResult.renderedLine + "\nHovered \(targetDescription)."
+            return actionObservationResult(
+                before: before,
+                after: after,
+                actionSummary: summary,
+                actionMetadata: actionResult.structuredMetadata
+            )
         }
     }
 }

@@ -9,6 +9,7 @@ import tempfile
 
 from .action_metadata import validated_action_metadata
 from .errors import ArtifactBudgetExceeded, DaemonProtocolError
+from .feedback import project_call_feedback
 
 
 SENSITIVE_ARGUMENTS = {
@@ -52,6 +53,8 @@ class TraceRecorder:
         self.max_trace_bytes = max_trace_bytes
         self.calls = []
         self.artifact_paths = []
+        self.artifact_sha256 = {}
+        self.feedback_events = []
 
     def close(self):
         if self._trace_fd is not None:
@@ -94,12 +97,17 @@ class TraceRecorder:
         tool,
         arguments,
         duration_ms,
+        is_mutation=False,
         result=None,
         artifact_paths=None,
         error=None,
     ):
         artifact_paths = list(artifact_paths or [])
-        result_summary = summarize_result(result) if result is not None else None
+        result_summary = (
+            summarize_result(result, expected_tool=tool)
+            if result is not None
+            else None
+        )
         success = (
             error is None
             and result is not None
@@ -112,6 +120,7 @@ class TraceRecorder:
             "index": index,
             "origin": "MODEL_CODE",
             "kind": kind,
+            "mutation": bool(is_mutation),
             "tool": tool,
             "arguments": redacted_arguments,
             "duration_ms": duration_ms,
@@ -132,6 +141,16 @@ class TraceRecorder:
             trace_entry["full_result_omitted"] = "trace budget exceeded"
             self._write_trace(trace_entry)
         self.calls.append(call)
+        self.feedback_events.append(
+            project_call_feedback(
+                index=index,
+                tool=tool,
+                is_mutation=is_mutation,
+                result=result,
+                artifact_paths=artifact_paths,
+                error=error,
+            )
+        )
         return call
 
     def _write_trace(self, entry):
@@ -168,7 +187,9 @@ class TraceRecorder:
         finally:
             os.close(descriptor)
         self._artifact_bytes += len(image_bytes)
-        return self.directory / filename
+        path = self.directory / filename
+        self.artifact_sha256[str(path)] = hashlib.sha256(image_bytes).hexdigest()
+        return path
 
 
 def redact_arguments(arguments, redaction_key):
@@ -199,14 +220,15 @@ def _redact_value(value, redaction_key, key_name):
     return repr(value)
 
 
-def summarize_result(result):
+def summarize_result(result, expected_tool=None):
     text = ""
     for item in result.get("content", []):
         if item.get("type") == "text" and isinstance(item.get("text"), str):
             text = item["text"]
             break
     action = validated_action_metadata(
-        (result.get("structuredContent") or {}).get("action")
+        (result.get("structuredContent") or {}).get("action"),
+        expected_tool=expected_tool,
     )
     action_summary = {
         key: action[key]

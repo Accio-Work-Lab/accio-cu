@@ -67,7 +67,7 @@ screen-level `click`, `double_click`, and `drag` calls that omit `app`.
 ```python
 screen = get_screen_state()
 print(screen.text)
-print(screen.screenshot_paths)
+emit({"screenshots": screen.screenshot_paths})
 ```
 
 ### `get_app_state`

@@ -80,10 +80,12 @@ means the screenshot and call use different coordinate spaces.
 Element-targeted clicks prefer native AX actions. Screen-level coordinates may
 AX-snap to an actionable element under the point before falling back to an input
 event. App-level coordinates use the app input fallback directly and do not
-currently AX-snap. Inspect the returned `[Result]` and screenshot. If
-`changed=none`, change target or route instead of repeating the same click.
-If the control may reveal content without activation, use `hover(...)`,
-inspect its returned state, and then target the revealed child.
+currently AX-snap. Inspect the returned `[Result]` first. Open its screenshot
+only when visible layout is still needed to resolve the next target or verify
+the final task result. If `changed=none`, change target or route instead of
+repeating the same click. If the control may reveal content without
+activation, use `hover(...)`, inspect its returned state, and then target the
+revealed child.
 
 When a coordinate comes from visual inspection, finish the observation block,
 open its screenshot artifact, then compose a new block with the measured

@@ -21,7 +21,7 @@ Accio brings macOS interaction into normal Python, so an agent can use the GUI o
 
 - **Hybrid by default.** Desktop actions and ordinary code share one execution block, including imports, conditions, loops, parsing, and local tools.
 - **Fewer model round trips.** A block can complete dependent steps, branch on returned state, and recover locally instead of asking the model to plan every click separately.
-- **Observable and verifiable.** GUI actions return refreshed accessibility state and screenshot artifacts; typed Python signatures catch invalid calls before they reach the desktop.
+- **Observable and verifiable.** A mutating block returns compact final state, important action notifications, and its latest screenshot without dumping the full accessibility tree. MCP attaches the image directly; CLI returns its artifact path.
 - **Reusable after success.** Code written for one task can be kept as a function or workflow instead of remaining an unstructured action trace.
 
 ## Quick start
@@ -172,7 +172,7 @@ The same coding runtime is available as one MCP tool named `execute`:
 }
 ```
 
-The tool accepts a Python program and returns its output, desktop calls, and screenshot artifacts. Limits are fixed when the MCP server starts.
+The tool accepts a Python program and returns its output, desktop calls, and compact execution feedback. After a GUI mutation, the latest trusted screenshot is attached as image content automatically; explicitly emitted screenshots remain supported and are deduplicated. Images are integrity-checked against the captured artifact and share a 32 MiB aggregate MCP delivery budget. Limits are fixed when the MCP server starts.
 
 This hybrid MCP is started with `code mcp`. The separate `accio-computer-use mcp` command is the lower-level interface that exposes individual desktop actions instead of the single `execute` tool.
 

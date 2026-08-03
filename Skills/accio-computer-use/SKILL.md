@@ -48,24 +48,35 @@ final = wait_for_element(
     element_text="Example Domain",
     timeout_seconds=10,
 )
-verified = get_app_state(app="Safari")
-emit({
-    "ax_candidate": "Example Domain" in final.text,
-    "screenshots": verified.screenshot_paths,
-})
+emit({"ax_candidate": "Example Domain" in final.text})
 PY
 ```
 
-After the action block exits, call the host image reader on the final emitted
-screenshot and wait for the image content before reporting completion. The
-path alone is not verification.
+After a block containing a desktop mutation exits, read its result envelope.
+Inspect the compact feedback first, including `execution_feedback.notifications`
+and `latest_observation`. Do not open its screenshot by default. When the
+feedback resolves the fact needed for the next decision, continue from that
+fresh semantic state. In CLI mode the latest screenshot is available at
+`latest_observation.screenshot.path`; in coding MCP mode the same trusted PNG is
+attached automatically. Only inspect the screenshot when it can resolve a
+remaining visual question or when verifying the user-visible task result.
+The state and screenshot are independent evidence: compare
+`state_source_call_index` with `screenshot_source_call_index` and their
+freshness fields. When their sources differ, do not assume that screenshot
+depicts that state; capture a new matching screenshot only if the unresolved
+predicate needs visual proof.
+Before reporting completion, wait for the required image content; a path alone
+is not verification.
 
-In MCP mode, screenshots are returned as image content only when their artifact
-paths are explicitly present in the value passed to `emit()`. This is why the
-examples emit `state.screenshot_paths`. Merely calling an observation helper
-does not attach every intermediate screenshot. The model receives the MCP
-result only after the entire coding block has finished; it cannot inspect an
-image or other output midway through the same block.
+An observation-only block has no automatic image handoff, so explicitly emit
+the screenshot paths needed by the model, as in the first example. `emit()`
+also remains the way to return a specific earlier or additional screenshot.
+When an emitted image is already the automatic latest screenshot, MCP returns
+it only once. MCP verifies the captured artifact digest and does not inline an
+image set larger than the 32 MiB aggregate delivery budget. The model receives
+the result only after the entire coding block
+has finished; it cannot inspect an image or other output midway through the
+same block.
 
 Keep one block focused on one coherent task or recovery attempt. Prefer a
 single coding block over many shell invocations when steps share state.
@@ -166,6 +177,8 @@ Each desktop call returns a `ToolResult`:
 - `result.screenshot_paths` lists extracted screenshot files.
 - `result.state` contains structured app/snapshot metadata when available;
   `result.snapshot_id` exposes its current snapshot ID without text parsing.
+- `result.route` and `result.changed` expose validated structured action
+  metadata when the native action supplies it.
 - `result.to_dict()` returns the processed result payload.
 
 Native tool failures raise `ToolError`. Catch it only when the block has a
@@ -187,8 +200,13 @@ bare acknowledgement. Its text depends on the action route:
   extracted from the same post-action result.
 
 Within the running block, Python can inspect `result.text` and branch
-programmatically. The model/host cannot see printed text or screenshots until
-the block exits. Choose the handoff based on the next decision:
+programmatically. Without `print()` or `emit()`, the full AX text remains
+inside the block. The compact block envelope still returns mutation counts,
+the latest post-action state and screenshot path, and important notifications
+such as `no_ax_change`, `unverifiable`, or `action_error`. `no_ax_change`
+means the accessibility snapshot did not confirm a change; inspect the screenshot
+before concluding that nothing visible happened. Choose any additional
+handoff based on the next decision:
 
 ```python
 result = click(app="TextEdit", element_text="Save")
@@ -197,11 +215,13 @@ result = click(app="TextEdit", element_text="Save")
 if "Save" in result.text and "changed=none" not in result.text:
     print("save action changed the app")
 
-# For model reasoning after this block exits, expose concise AX/screen text.
-print(result.text)
+# For model reasoning after this block exits, expose only relevant lines.
+for line in result.text.splitlines():
+    if line.startswith("[Result]") or "Save" in line:
+        print(line)
 
-# For visual reasoning after this block exits, expose the artifact paths.
-emit({"screenshots": result.screenshot_paths})
+# No emit is needed for this latest mutation screenshot. In CLI mode read
+# execution_feedback.latest_observation.screenshot.path; MCP attaches it.
 ```
 
 - Continue in the same block only for a pre-planned sequence or a condition
@@ -216,20 +236,26 @@ emit({"screenshots": result.screenshot_paths})
   still identifies the same logical control; always refresh an index or
   coordinate.
 - Use returned AX or `AXDIFF` state as the immediate validity check for a single
-  action. At a stage or task boundary, AX is supporting evidence rather than
-  completion proof.
+  action. At task completion, AX is supporting evidence rather than completion
+  proof.
+- When compact feedback confirms a routine action and the next semantic target
+  is already known, continue without opening the screenshot. Screenshot
+  availability is not an instruction to inspect it.
 - When the next step needs model semantic reasoning, print only the relevant AX
   or `[Screen]` lines and end the block; dumping a full tree wastes tokens.
-- When the next step needs visual reasoning, emit the screenshot paths and end
-  the block, then use the host's image-reading capability.
-- When both signals matter, print concise text evidence and emit screenshot
-  paths together before ending the block.
-- At every stage or task completion boundary, expose and inspect the latest
-  matching screenshot before reporting completion. The final action's returned
-  screenshot is sufficient when it is current; otherwise observe again.
-- Re-observe only when returned context is incomplete/stale, a new phase begins,
-  or independent verification needs fresh state. Use `get_app_state()` after an
-  app-level route and `get_screen_state()` after a screen-level route.
+- Only inspect the screenshot when the next step depends on visual layout or
+  coordinates; feedback reports `no_ax_change` or `unverifiable`; an error or
+  incomplete/stale semantic state leaves a relevant fact unresolved; or the
+  task is ready for final visual verification. Use `emit()` only for an
+  additional or observation-only screenshot.
+- When both signals matter, print concise text evidence; the latest mutation
+  screenshot is handed off automatically.
+- At task completion, inspect the freshest matching screenshot once before
+  reporting success. In CLI mode read the reported path; in MCP mode read the
+  attached image. Observe again only when that evidence is stale or does not
+  show the goal.
+- Re-observe only when the current evidence cannot resolve a fact required for
+  the next decision or completion claim.
 
 ## Load interaction skills on demand
 
@@ -259,12 +285,33 @@ observe -> choose target -> act -> inspect returned state -> verify goal
    action helpers already refresh it.
 5. Call `wait_for_element(...)` only when an asynchronous transition is still
    in progress.
-6. At each stage or task boundary, inspect the latest screenshot and verify the
-   goal before reporting completion.
+6. At task completion, inspect the freshest matching screenshot and verify the
+   user-visible goal before reporting success.
 
-Do not add a redundant observation after every action. Observe again when the
-returned state is stale, an asynchronous update is pending, or a new phase of
-the task begins.
+## Evidence sufficiency
+
+Before requesting another observation, name the unresolved goal predicate: the
+specific fact still needed to choose the next action or support completion.
+
+1. If the fresh result resolves that predicate, continue or stop. Do not
+   observe again merely because another observation route exists.
+2. Otherwise choose one observation that can resolve the missing fact. Prefer
+   the narrowest suitable semantic or visual signal.
+3. Never observe when it adds no new evidence over the current result. A new
+   screenshot, AX tree, or readback is useful only if it can change the next
+   decision or completion judgment.
+4. At task completion, verify the user-visible goal once with the freshest
+   matching screenshot. Re-capture only when it is stale, missing, or does not
+   show the relevant result.
+5. Use another execution route only when the runtime, a loaded domain skill, or
+   the task context declares it available and it provides semantically
+   independent evidence. Do not invent an integration solely to manufacture
+   verification.
+
+An action return, `execution_feedback`, AX state, a screenshot, and a durable
+readback are evidence sources, not mandatory steps. Select the smallest set
+that resolves the current predicate. Do not add a redundant observation after
+every action.
 
 ## Choose targets
 
@@ -278,8 +325,9 @@ Prefer targets in this order:
 3. Coordinates read from the latest screenshot.
 
 When a known AX target is outside the latest screenshot, keep the semantic
-target and scroll the intended container in fractional increments. Inspect each
-returned screenshot and resolve the target again before clicking. Use
+target and scroll the intended container in fractional increments. Use each
+returned state to resolve the target again before clicking; inspect its
+screenshot only when visible layout or coordinates remain unresolved. Use
 untargeted whole-view scrolling only when no nested scroll region is available.
 
 Never reuse an index or coordinate from an older state. Use `menu_select` for
@@ -330,7 +378,8 @@ loops bounded and make each retry change something meaningful.
 When a call fails:
 
 1. Read the exception and its `ToolResult` when available.
-2. Inspect the last returned AX state and screenshot.
+2. Identify the unresolved fact, then inspect only the returned evidence that
+   can distinguish the recovery choices.
 3. Retry with a different target or interaction route.
 4. Stop and reassess after repeated no-change results.
 
@@ -342,21 +391,21 @@ before using one.
 ## Verification
 
 Treat successful function return as delivery evidence, not goal completion.
-Use returned AX or `AXDIFF` state to validate an individual action and as an
-auxiliary observation of stage or task completion. Do not use AX alone as
-completion proof.
+Use returned AX or `AXDIFF` state to validate an individual action and as
+supporting evidence for completion.
 
-Every completed stage and completed task requires visual verification. Expose
-the latest matching screenshot, end the coding block, read the image with the
-host, and compare the visible result with the goal before reporting completion.
-Receiving or emitting a screenshot path is not visual verification. Require an
-actual host image-reading call. Wait until image content has returned to the model.
+At task completion, end the coding block and inspect the freshest matching
+screenshot from automatic mutation feedback, or explicitly emit one from an
+observation-only block. Compare the visible result with the user's goal once
+before reporting success. Receiving a path is not visual verification. In CLI
+mode require an actual host image-reading call; in MCP mode wait until the
+attached image content reaches the model.
 
-For persistent outcomes, screenshot verification is required but insufficient.
-Also read the durable state back through an independent route such as
-application-native scripting or automation (including AppleScript or JXA), an
-application or service API, filesystem inspection, or direct data-state
-inspection. Require the visual result and durable readback to agree.
+When the task changes persistent state and a declared, semantically independent
+readback route is available, use it to verify the durable goal predicate as
+well. If no such route is available, do not improvise one or repeat the same UI
+observation under a different name; report only what the available evidence
+supports.
 
 Read
 [interaction-skills/waiting-and-verification.md](interaction-skills/waiting-and-verification.md)

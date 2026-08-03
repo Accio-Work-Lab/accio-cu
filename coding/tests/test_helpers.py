@@ -137,11 +137,73 @@ class HelperTests(unittest.TestCase):
             text,
         )
 
-    def test_start_here_obtains_a_real_screenshot_after_waiting(self):
+    def test_start_here_uses_automatic_post_action_screenshot(self):
         text = (SKILL_ROOT / "SKILL.md").read_text()
 
-        self.assertIn('verified = get_app_state(app="Safari")', text)
+        self.assertNotIn('verified = get_app_state(app="Safari")', text)
         self.assertNotIn('"screenshots": final.screenshot_paths', text)
+        self.assertIn("execution_feedback.latest_observation", text)
+
+    def test_routine_mutation_does_not_require_visual_inspection(self):
+        text = (SKILL_ROOT / "SKILL.md").read_text()
+
+        self.assertIn("Inspect the compact feedback first", text)
+        self.assertIn("Do not open its screenshot by default", text)
+        self.assertIn("Only inspect the screenshot when", text)
+
+    def test_skill_treats_state_and_screenshot_as_independent_evidence(self):
+        text = (SKILL_ROOT / "SKILL.md").read_text()
+        normalized = " ".join(text.split())
+
+        self.assertIn("state and screenshot are independent evidence", normalized)
+        self.assertIn("state_source_call_index", normalized)
+        self.assertIn("screenshot_source_call_index", normalized)
+        self.assertIn("do not assume that screenshot depicts that state", normalized)
+
+    def test_main_skill_uses_general_evidence_sufficiency_policy(self):
+        text = (SKILL_ROOT / "SKILL.md").read_text()
+
+        self.assertIn("## Evidence sufficiency", text)
+        self.assertIn("unresolved goal predicate", text)
+        self.assertIn("fresh result resolves that predicate", text)
+        self.assertIn("adds no new evidence", text)
+        self.assertIn("one observation that can resolve the missing fact", text)
+        self.assertNotIn("beginning a new phase or app", text)
+
+    def test_verification_uses_only_declared_independent_routes(self):
+        text = (SKILL_ROOT / "SKILL.md").read_text()
+        normalized = " ".join(text.split())
+
+        self.assertIn("declares it available", normalized)
+        self.assertIn("semantically independent evidence", normalized)
+        self.assertIn("Do not invent an integration", normalized)
+        self.assertNotIn("such as application-native scripting", text)
+
+    def test_visual_completion_check_is_not_required_after_every_stage(self):
+        text = (SKILL_ROOT / "SKILL.md").read_text()
+
+        self.assertIn("At task completion", text)
+        self.assertIn("freshest matching screenshot", text)
+        self.assertNotIn("Every completed stage and completed task", text)
+
+    def test_action_handoff_example_does_not_dump_full_result_text(self):
+        text = (SKILL_ROOT / "SKILL.md").read_text()
+        handoff = text.split("## Use the observation returned by each action", 1)[
+            1
+        ].split("## Load interaction skills on demand", 1)[0]
+
+        self.assertNotIn("print(result.text)", handoff)
+        self.assertIn("result.text.splitlines()", handoff)
+
+    def test_observation_skill_emits_images_instead_of_printing_paths(self):
+        text = (
+            SKILL_ROOT / "interaction-skills" / "observation-and-targeting.md"
+        ).read_text()
+
+        self.assertIn('emit({"screenshots": state.screenshot_paths})', text)
+        self.assertIn('emit({"screenshots": screen.screenshot_paths})', text)
+        self.assertNotIn("print(state.screenshot_paths)", text)
+        self.assertNotIn("print(screen.screenshot_paths)", text)
 
     def test_main_skill_requires_initial_observation_handoff_before_side_effects(self):
         text = (SKILL_ROOT / "SKILL.md").read_text()
@@ -154,12 +216,17 @@ class HelperTests(unittest.TestCase):
 
     def test_main_skill_requires_host_image_read_for_visual_verification(self):
         text = (SKILL_ROOT / "SKILL.md").read_text()
+        normalized = " ".join(text.split())
 
         self.assertIn(
-            "Receiving or emitting a screenshot path is not visual verification",
-            text,
+            "In CLI mode require an actual host image-reading",
+            normalized,
         )
-        self.assertIn("image content has returned to the model", text)
+        self.assertIn(
+            "Receiving a path is not visual verification",
+            normalized,
+        )
+        self.assertIn("attached image content reaches the model", normalized)
 
     def test_start_here_separates_initial_observation_from_actions(self):
         text = (SKILL_ROOT / "SKILL.md").read_text()
@@ -184,8 +251,8 @@ class HelperTests(unittest.TestCase):
             "## Initial observation gate", 1
         )[0]
 
-        self.assertIn("call the host image reader", start_here)
-        self.assertIn("before reporting completion", start_here)
+        self.assertIn("Before reporting completion", start_here)
+        self.assertIn("required image content", start_here)
 
     def test_optional_none_is_omitted_but_falsey_values_are_forwarded(self):
         calls = []
@@ -249,6 +316,42 @@ class HelperTests(unittest.TestCase):
         ):
             helpers.configure(lambda name, arguments: None, mismatched)
 
+    def test_runtime_contract_requires_every_code_defined_native_helper(self):
+        with self.assertRaisesRegex(
+            helpers.IncompatibleRuntimeError, "missing required tool.*hover"
+        ):
+            helpers.validate_runtime_contract(
+                [tool_definition("get_app_state", ["app"], ["app"])]
+            )
+
+    def test_signature_rejects_unknown_semantic_schema_constraints(self):
+        tool = tool_definition("click", list(inspect.signature(helpers.click).parameters))
+        tool["inputSchema"]["properties"]["click_count"]["maximum"] = 0
+
+        with self.assertRaisesRegex(
+            helpers.HelperContractError, "click_count schema does not match"
+        ):
+            helpers.configure(lambda name, arguments: None, [tool])
+
+    def test_signature_rejects_required_names_without_properties(self):
+        tool = tool_definition("get_app_state", ["app"], ["app"])
+        tool["inputSchema"]["required"].append("impossible_ghost")
+
+        with self.assertRaisesRegex(
+            helpers.HelperContractError,
+            "required names are missing from properties: impossible_ghost",
+        ):
+            helpers.configure(lambda name, arguments: None, [tool])
+
+    def test_signature_ignores_documentation_only_schema_metadata(self):
+        tool = tool_definition("get_app_state", ["app"], ["app"])
+        tool["inputSchema"]["description"] = "Native API documentation."
+        tool["inputSchema"]["properties"]["app"]["description"] = "App name."
+
+        exported = helpers.configure(lambda name, arguments: None, [tool])
+
+        self.assertIn("get_app_state", exported)
+
     def test_unknown_daemon_tools_are_not_injected(self):
         exported = helpers.configure(
             lambda name, arguments: None,
@@ -299,6 +402,7 @@ class HelperTests(unittest.TestCase):
                     process.kill()
                     process.wait(timeout=2)
 
+        helpers.validate_runtime_contract(tools)
         exported = helpers.configure(lambda name, arguments: None, tools)
         native_helper_names = set(EXPECTED_SIGNATURES) - {"double_click"}
         advertised_names = {tool["name"] for tool in tools}
@@ -311,11 +415,47 @@ def tool_definition(name, parameters, required=None):
         "name": name,
         "inputSchema": {
             "type": "object",
-            "properties": {parameter: {"type": "string"} for parameter in parameters},
+            "properties": {
+                parameter: helper_parameter_schema(parameter)
+                for parameter in parameters
+            },
             "required": list(required or []),
             "additionalProperties": False,
         },
     }
+
+
+def helper_parameter_schema(parameter):
+    if parameter == "click_count":
+        return {"type": "integer"}
+    if parameter == "path":
+        return {"type": "array", "items": {"type": "string"}}
+    number_parameters = {
+        "x",
+        "y",
+        "from_x",
+        "from_y",
+        "to_x",
+        "to_y",
+        "pages",
+        "timeout_seconds",
+        "poll_interval",
+    }
+    schema = {"type": "number" if parameter in number_parameters else "string"}
+    enum_values = {
+        "coordinate_space": ["pixel", "normalized_1000", "normalized_1"],
+        "mouse_button": ["left", "right", "middle"],
+        "direction": ["up", "down", "left", "right"],
+        "wait_mode": [
+            "element_text",
+            "window_title_contains",
+            "element_count_changed",
+            "focused_value_contains",
+        ],
+    }.get(parameter)
+    if enum_values is not None:
+        schema["enum"] = enum_values
+    return schema
 
 
 if __name__ == "__main__":

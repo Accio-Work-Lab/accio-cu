@@ -41,7 +41,10 @@ daemon_is_healthy() {
   if [[ -x "$CANONICAL_BINARY" ]] &&
      "$CANONICAL_BINARY" help daemon-status 2>/dev/null |
        grep -q "accio-computer-use daemon-status"; then
-    "$CANONICAL_BINARY" daemon-status "$SOCKET_PATH" >/dev/null 2>&1
+    "$CANONICAL_BINARY" daemon-status "$SOCKET_PATH" >/dev/null 2>&1 || return 1
+    printf 'pass\n' | "$CANONICAL_BINARY" code --socket "$SOCKET_PATH" \
+      --timeout 2 --call-timeout 1 --max-calls 1 \
+      >/dev/null 2>&1
     return
   fi
 

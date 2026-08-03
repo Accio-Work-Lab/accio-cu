@@ -44,9 +44,19 @@ class PublicEntrypointTests(unittest.TestCase):
         app_installer = (REPO_ROOT / "scripts" / "install-macos.sh").read_text()
 
         self.assertIn('daemon-status "$SOCKET_PATH"', daemon_installer)
+        self.assertIn('code --socket "$SOCKET_PATH"', daemon_installer)
+        self.assertIn('--timeout 2 --call-timeout 1 --max-calls 1', daemon_installer)
         self.assertIn("Status: loaded but unhealthy", daemon_installer)
         self.assertIn("DAEMON_RESTART_HEALTHY", app_installer)
         self.assertIn('"$REPO_ROOT/scripts/install-daemon.sh" status', app_installer)
+
+    def test_app_installer_fails_when_daemon_reinstall_is_unhealthy(self):
+        installer = (REPO_ROOT / "scripts" / "install-macos.sh").read_text()
+        reinstall = installer.split('if [[ "$REINSTALL_DAEMON" == true ]]', 1)[1]
+        reinstall = reinstall.split("# Warn if a stale binary", 1)[0]
+        unhealthy = reinstall.split('if [[ "$DAEMON_RESTART_HEALTHY" != true ]]', 1)[1]
+
+        self.assertIn("exit 1", unhealthy)
 
     def test_scroll_skill_prefers_precise_filtering_and_visual_recovery(self):
         skill = (
