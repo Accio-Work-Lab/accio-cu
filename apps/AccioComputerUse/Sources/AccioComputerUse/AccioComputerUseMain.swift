@@ -51,8 +51,18 @@ enum AccioComputerUseMain {
                 exit(status)
             }
 
-        case .setup:
-            SetupAssistant.run()
+        case let .setup(waitForPermissions):
+            let completed = SetupAssistant.run(waitForPermissions: waitForPermissions)
+            if waitForPermissions && !completed {
+                exit(EXIT_FAILURE)
+            }
+
+        case .permissionStatus:
+            let permissions = PermissionDiagnostics.runtimeProbe()
+            print(permissions.summary)
+            if !permissions.allGranted {
+                exit(EXIT_FAILURE)
+            }
 
         case .mcp:
             // stdio MCP runs as a subprocess of the MCP client; a modal alert
@@ -86,6 +96,7 @@ enum AccioComputerUseMain {
             }
 
         case .doctor:
+            print("Version: \(resolvedVersionDescription())")
             let permissions = PermissionDiagnostics.current()
             print(permissions.summary)
             let daemonAvailable = DaemonClient.isAvailable()
@@ -137,7 +148,7 @@ enum AccioComputerUseMain {
             print(helpText(command: command))
 
         case .version:
-            print(resolvedVersion())
+            print(resolvedVersionDescription())
         }
     }
 

@@ -40,12 +40,17 @@ INSTALL_SKILL=false
 SKILL_TARGET="codex"
 SKILL_ONLY=false
 RESET_PERMISSIONS=false
-SIGNING_IDENTITY="${ACCIO_CODESIGN_IDENTITY:--}"
+CONTINUE_INSTALL=false
+NO_ONBOARDING=false
+SIGNING_MODE="${ACCIO_SIGNING_MODE:-local}"
+SIGNING_IDENTITY="${ACCIO_CODESIGN_IDENTITY:-}"
+LOCAL_SIGNING_IDENTITY_NAME="Accio Computer Use Local Development"
 REINSTALL_DAEMON=false
 DAEMON_WAS_LOADED=false
 UPGRADE_DAEMON_STOPPED=false
 UPGRADE_DAEMON_REINSTALLED=false
 DAEMON_RESTART_HEALTHY=true
+ONBOARDING_COMPLETED=false
 DAEMON_LABEL="com.accio.computeruse.daemon"
 DAEMON_PLIST="$HOME/Library/LaunchAgents/$DAEMON_LABEL.plist"
 
@@ -59,8 +64,11 @@ Usage: install-macos.sh [options]
   --skill-only [TARGET]    Install only the agent skill and skip app/CLI install.
   --reset-permissions      Reset Accio's Accessibility and Screen Recording grants after install.
                            Use when macOS keeps stale TCC records after local rebuilds.
+  --continue-install       Resume permission setup, daemon install, and verification without rebuilding.
+  --no-onboarding          Install the package without interactive permission setup or daemon install.
   --signing-identity ID    Sign with a persistent keychain identity or SHA-1 hash.
-                           Defaults to ACCIO_CODESIGN_IDENTITY, then ad-hoc (-).
+                           Overrides --signing-mode and ACCIO_SIGNING_MODE.
+  --signing-mode MODE      local (default), explicit, or adhoc.
   --uninstall              Stop Accio, clear its two macOS grants, and remove the app/CLI.
   --prefix PATH            Install prefix (default: /usr/local). May also set PREFIX env.
 
@@ -68,6 +76,7 @@ Environment:
   PREFIX                   Same as --prefix when --prefix is not passed.
   CODEX_HOME               Codex skill root parent (default: ~/.codex).
   ACCIO_CODESIGN_IDENTITY  Persistent local or Developer ID signing identity.
+  ACCIO_SIGNING_MODE       Default signing mode when no identity is supplied.
 
 Examples:
   ./scripts/install-macos.sh
@@ -76,6 +85,8 @@ Examples:
   ./scripts/install-macos.sh --skill-only
   ./scripts/install-macos.sh --verify --reset-permissions
   ./scripts/install-macos.sh --signing-identity "Developer ID Application: Example (TEAMID)"
+  ./scripts/install-macos.sh --signing-mode adhoc --no-onboarding --verify
+  ./scripts/install-macos.sh --continue-install
   ./scripts/install-macos.sh --install-skill "$HOME/.config/my-agent/skills"
   PREFIX="$HOME/.local" ./scripts/install-macos.sh --verify
   ./scripts/install-macos.sh --uninstall
@@ -114,16 +125,35 @@ while [[ $# -gt 0 ]]; do
     --reset-permissions)
       RESET_PERMISSIONS=true
       ;;
+    --continue-install)
+      CONTINUE_INSTALL=true
+      ;;
+    --no-onboarding)
+      NO_ONBOARDING=true
+      ;;
     --signing-identity)
       if [[ $# -lt 2 ]]; then
         echo "install-macos.sh: --signing-identity requires an identity" >&2
         exit 1
       fi
       SIGNING_IDENTITY="$2"
+      SIGNING_MODE="explicit"
       shift
       ;;
     --signing-identity=*)
       SIGNING_IDENTITY="${1#*=}"
+      SIGNING_MODE="explicit"
+      ;;
+    --signing-mode)
+      if [[ $# -lt 2 ]]; then
+        echo "install-macos.sh: --signing-mode requires local, explicit, or adhoc" >&2
+        exit 1
+      fi
+      SIGNING_MODE="$2"
+      shift
+      ;;
+    --signing-mode=*)
+      SIGNING_MODE="${1#*=}"
       ;;
     --uninstall)
       UNINSTALL=true
@@ -154,15 +184,20 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-if ! accio_validate_signing_identity "$SIGNING_IDENTITY"; then
-  exit 1
-fi
-
 TARGET_PATH="${INSTALL_DIR}/${BINARY_NAME}"
 LEGACY_CODE_COMMAND_PATH="${INSTALL_DIR}/accio-cu-code"
 SKILL_SOURCE="$REPO_ROOT/Skills/accio-computer-use"
 CODING_SOURCE="$REPO_ROOT/coding"
 LEGACY_CODE_RESOURCE="$APP_BUNDLE/Contents/Resources/coding/accio-cu-code"
+
+if [[ "$CONTINUE_INSTALL" == true && "$UNINSTALL" == true ]]; then
+  echo "install-macos.sh: --continue-install cannot be combined with --uninstall" >&2
+  exit 1
+fi
+if [[ "$CONTINUE_INSTALL" == true && "$SKILL_ONLY" == true ]]; then
+  echo "install-macos.sh: --continue-install cannot be combined with --skill-only" >&2
+  exit 1
+fi
 
 remove_verified_legacy_code_command() {
   if [[ ! -e "$LEGACY_CODE_COMMAND_PATH" ]] && [[ ! -L "$LEGACY_CODE_COMMAND_PATH" ]]; then
@@ -206,6 +241,42 @@ install_agent_skill() {
   rm -rf "$skills_dir/accio-computer-use"
   cp -R "$SKILL_SOURCE" "$skills_dir/accio-computer-use"
   echo "Installed agent skill: $skills_dir/accio-computer-use"
+}
+
+installed_runner_smoke_test() {
+  local binary="${1:-}"
+  [[ -x "$binary" ]] || {
+    echo "install-macos.sh: installed binary is unavailable: $binary" >&2
+    return 1
+  }
+  echo "Running installed Python runner smoke test..."
+  env -u ACCIO_COMPUTER_USE_CODING_RUNNER "$binary" code --version
+}
+
+finish_onboarding() {
+  local app_binary="$APP_BUNDLE/Contents/MacOS/$BINARY_NAME"
+
+  if [[ ! -x "$app_binary" ]] || \
+     ! /usr/bin/codesign --verify --deep --strict "$APP_BUNDLE" 2>/dev/null; then
+    echo "install-macos.sh: no valid installed Accio app is available to continue." >&2
+    echo "Run: ./scripts/install-macos.sh --install-skill" >&2
+    return 1
+  fi
+
+  echo "Starting first-run permission setup."
+  echo "If interrupted, resume without rebuilding: ./scripts/install-macos.sh --continue-install"
+  if ! env -u ACCIO_COMPUTER_USE_CODING_RUNNER \
+      "$app_binary" setup --wait-for-permissions; then
+    echo "Installation is complete, but permission setup is pending." >&2
+    echo "Resume with: ./scripts/install-macos.sh --continue-install" >&2
+    return 2
+  fi
+
+  echo "Installing and verifying the background daemon..."
+  ACCIO_COMPUTER_USE_BINARY="$app_binary" "$REPO_ROOT/scripts/install-daemon.sh" install
+  "$REPO_ROOT/scripts/install-daemon.sh" status
+  installed_runner_smoke_test "$app_binary"
+  echo "Accio Computer Use installation is complete."
 }
 
 quit_running_app_bundle() {
@@ -325,6 +396,46 @@ if [[ "$SKILL_ONLY" == true ]]; then
   exit 0
 fi
 
+if [[ "$CONTINUE_INSTALL" == true ]]; then
+  if [[ "$NO_ONBOARDING" == true ]]; then
+    echo "install-macos.sh: --continue-install cannot be combined with --no-onboarding" >&2
+    exit 1
+  fi
+  finish_onboarding
+  exit $?
+fi
+
+case "$SIGNING_MODE" in
+  local)
+    if [[ -n "$SIGNING_IDENTITY" ]]; then
+      SIGNING_MODE="explicit"
+    else
+      echo "Preparing persistent local signing identity: $LOCAL_SIGNING_IDENTITY_NAME"
+      SIGNING_IDENTITY="$(accio_ensure_local_signing_identity "$LOCAL_SIGNING_IDENTITY_NAME")" || exit 1
+    fi
+    ;;
+  explicit)
+    if [[ -z "$SIGNING_IDENTITY" ]]; then
+      echo "install-macos.sh: explicit signing mode requires --signing-identity or ACCIO_CODESIGN_IDENTITY" >&2
+      exit 1
+    fi
+    ;;
+  adhoc)
+    if [[ -n "$SIGNING_IDENTITY" ]]; then
+      echo "install-macos.sh: adhoc signing mode cannot be combined with a signing identity" >&2
+      exit 1
+    fi
+    SIGNING_IDENTITY="-"
+    ;;
+  *)
+    echo "install-macos.sh: invalid signing mode '$SIGNING_MODE' (expected local, explicit, or adhoc)" >&2
+    exit 1
+    ;;
+esac
+if ! accio_validate_signing_identity "$SIGNING_IDENTITY"; then
+  exit 1
+fi
+
 # Preserve the daemon's actual loaded state across upgrades. A plist that is
 # present but intentionally unloaded must remain unloaded.
 if accio_launch_agent_is_loaded "$DAEMON_LABEL"; then
@@ -338,6 +449,10 @@ if accio_launch_agent_is_loaded "$DAEMON_LABEL"; then
 fi
 
 cd "$REPO_ROOT"
+PROJECT_REVISION="$(git rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')"
+if [[ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+  PROJECT_REVISION="${PROJECT_REVISION}-dirty"
+fi
 BIN_DIR="$(swift build -c release --product AccioComputerUse --show-bin-path)"
 swift build -c release --product AccioComputerUse
 SRC_BINARY="${BIN_DIR}/AccioComputerUse"
@@ -435,6 +550,8 @@ tee "$STAGED_APP_BUNDLE/Contents/Info.plist" > /dev/null <<INFOPLIST
     <string>$PROJECT_VERSION</string>
     <key>CFBundleShortVersionString</key>
     <string>$PROJECT_VERSION</string>
+    <key>AccioBuildRevision</key>
+    <string>$PROJECT_REVISION</string>
     <key>CFBundleExecutable</key>
     <string>$BINARY_NAME</string>
     <key>CFBundleIconFile</key>
@@ -539,6 +656,19 @@ fi
 
 echo "Symlinked: $TARGET_PATH → $APP_BINARY"
 
+PATH_COMMAND="$(command -v "$BINARY_NAME" 2>/dev/null || true)"
+if [[ -n "$PATH_COMMAND" ]]; then
+  PATH_COMMAND_REAL="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$PATH_COMMAND")"
+  APP_BINARY_REAL="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$APP_BINARY")"
+  if [[ "$PATH_COMMAND_REAL" != "$APP_BINARY_REAL" ]]; then
+    echo "WARNING: PATH resolves $BINARY_NAME to an older or unrelated copy:" >&2
+    echo "  $PATH_COMMAND → $PATH_COMMAND_REAL" >&2
+    echo "Expected the installed command to resolve to:" >&2
+    echo "  $APP_BINARY_REAL" >&2
+    echo "Remove the shadowing command or place $INSTALL_DIR earlier in PATH, then refresh the shell command cache." >&2
+  fi
+fi
+
 # Older installs exposed the Python runner as a second command. The native
 # app-bundled binary now owns both native commands and coding mode.
 remove_verified_legacy_code_command
@@ -548,22 +678,45 @@ if [[ "$INSTALL_SKILL" == true ]]; then
 fi
 
 if [[ "$REINSTALL_DAEMON" == true ]]; then
+  DAEMON_INSTALL_STATUS=0
   echo "Migrating existing daemon LaunchAgent to the private socket path..."
   if ACCIO_COMPUTER_USE_BINARY="$TARGET_PATH" "$REPO_ROOT/scripts/install-daemon.sh" install; then
     echo "Daemon health check passed."
+    UPGRADE_DAEMON_REINSTALLED=true
   else
+    DAEMON_INSTALL_STATUS=$?
     DAEMON_RESTART_HEALTHY=false
-  fi
-  UPGRADE_DAEMON_REINSTALLED=true
-  if [[ "$DAEMON_RESTART_HEALTHY" != true ]]; then
-    echo "WARNING: daemon LaunchAgent was reinstalled but is not healthy." >&2
-    if [[ "$PERMISSION_ACTION" == "reset" ]]; then
-      echo "Re-enable Accessibility and Screen Recording, restart the helper, then run:" >&2
+    DAEMON_FAILURE_ACTION="$(accio_daemon_reinstall_failure_action \
+      "$DAEMON_INSTALL_STATUS" "$NO_ONBOARDING")"
+    if [[ "$DAEMON_FAILURE_ACTION" == "onboard" ]]; then
+      # Package replacement succeeded. Do not restore a KeepAlive job while
+      # permissions are pending; finish_onboarding installs it only after the
+      # canonical app passes both runtime permission probes.
+      UPGRADE_DAEMON_REINSTALLED=true
+      finish_onboarding
+      ONBOARDING_COMPLETED=true
+      DAEMON_RESTART_HEALTHY=true
+    elif [[ "$DAEMON_FAILURE_ACTION" == "permission-pending" ]]; then
+      # The package upgrade succeeded, but the new canonical binary does not
+      # have effective permissions. Keep the old LaunchAgent stopped instead
+      # of letting the EXIT trap restore a KeepAlive job that cannot start.
+      UPGRADE_DAEMON_REINSTALLED=true
+      echo "Permission setup is pending and onboarding was disabled." >&2
+      echo "Resume with: $REPO_ROOT/scripts/install-macos.sh --continue-install" >&2
+      exit 2
     else
-      echo "Refresh Accessibility and Screen Recording, restart the helper, then run:" >&2
+      echo "install-macos.sh: daemon reinstall failed with status $DAEMON_INSTALL_STATUS." >&2
+      echo "This is not a permission-pending result; onboarding was not started." >&2
+      exit "$DAEMON_INSTALL_STATUS"
     fi
-    echo "  $REPO_ROOT/scripts/install-daemon.sh install" >&2
   fi
+elif [[ "$NO_ONBOARDING" != true && ! -f "$DAEMON_PLIST" ]]; then
+  finish_onboarding
+  ONBOARDING_COMPLETED=true
+fi
+
+if [[ "$VERIFY" != true && "$ONBOARDING_COMPLETED" != true ]]; then
+  installed_runner_smoke_test "$APP_BINARY"
 fi
 
 # Warn if a stale binary or symlink elsewhere in PATH would shadow the new one.
@@ -622,21 +775,24 @@ Accio Computer Use needs two settings (System Settings → Privacy & Security):
 Seeing "Accio Computer Use" in these macOS app lists is expected: this is how
 macOS grants permissions to the shared app-bundled binary.
 
-For first-run setup and verification, run:
+Normal installs complete permission setup and daemon verification automatically.
+If the permission flow was interrupted, resume without rebuilding:
 
-  accio-computer-use setup
+  scripts/install-macos.sh --continue-install
 
-The setup assistant opens permission shortcuts, prints MCP configuration, and
-shows daemon and automation-pause status. During use, the menu bar app and the
-top-of-screen activity pill show when Accio is observing or acting. For
-script-only diagnostics, run:
+The standalone setup assistant remains available for diagnostics, MCP
+configuration, daemon status, and automation-pause status. During use, the menu
+bar app and the top-of-screen activity pill show when Accio is observing or
+acting. For script-only diagnostics, run:
 
   accio-computer-use doctor
 
-For permissions that survive rebuilds, install every build with the same
---signing-identity (or ACCIO_CODESIGN_IDENTITY). The installer compares the old
-and new designated requirements. Ad-hoc installs always reset only Accio's two
-grants; persistent identities reset them only when changed or explicitly requested.
+The default local signing mode creates and reuses an identity in your login
+keychain so permissions survive rebuilds. You may instead install every build
+with the same --signing-identity (or ACCIO_CODESIGN_IDENTITY). The installer
+compares old and new designated requirements. Ad-hoc installs always reset only
+Accio's two grants; persistent identities reset them only when changed or
+explicitly requested.
 
 EOF
 
@@ -644,7 +800,7 @@ if [[ "$VERIFY" == true ]]; then
   echo "Running: $TARGET_PATH doctor"
   "$TARGET_PATH" doctor
   echo ""
-  if [[ "$REINSTALL_DAEMON" == true ]]; then
+  if [[ "$REINSTALL_DAEMON" == true || "$ONBOARDING_COMPLETED" == true ]]; then
     if [[ "$DAEMON_RESTART_HEALTHY" != true ]]; then
       echo "Retrying daemon health after installation diagnostics..."
     fi
@@ -657,10 +813,11 @@ if [[ "$VERIFY" == true ]]; then
     echo ""
   fi
   echo "Running coding runner smoke test through the installed CLI path..."
-  "$TARGET_PATH" code --version
+  env -u ACCIO_COMPUTER_USE_CODING_RUNNER "$TARGET_PATH" code --version
   echo ""
   echo "Running coding runner smoke test through PATH command lookup..."
-  env PATH="$INSTALL_DIR:$PATH" "$BINARY_NAME" code --version
+  env -u ACCIO_COMPUTER_USE_CODING_RUNNER \
+    PATH="$INSTALL_DIR:$PATH" "$BINARY_NAME" code --version
   echo ""
-  echo "Next: run $TARGET_PATH setup for the interactive TUI setup assistant."
+  echo "Installation verification completed."
 fi

@@ -387,11 +387,12 @@ Screen Recording, restart the menu bar helper, then run
 health from `launchctl print`, a plist, or a socket path alone.
 
 If a shell reports that the internal Python runner is missing, resolve the
-installed command through `PATH` and retry the coding smoke test:
+installed command through `PATH`, remove any source-checkout override, and
+retry the coding smoke test:
 
 ```bash
 ACCIO_CLI="$(command -v accio-computer-use)"
-"$ACCIO_CLI" code --version
+env -u ACCIO_COMPUTER_USE_CODING_RUNNER "$ACCIO_CLI" code --version
 ```
 
 Do not hardcode a user-specific absolute path in workflows. Use

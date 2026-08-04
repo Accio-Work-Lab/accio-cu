@@ -276,12 +276,17 @@ public enum SetupAssistant {
     public static func run(
         socketPath: String = DaemonServer.defaultSocketPath,
         input: FileHandle = .standardInput,
-        output: FileHandle = .standardOutput
-    ) {
+        output: FileHandle = .standardOutput,
+        waitForPermissions: Bool = false
+    ) -> Bool {
         let interactive = isatty(input.fileDescriptor) != 0
         printLine(dashboard(status: CompanionStatus.current(socketPath: socketPath), interactive: interactive), output: output)
 
-        guard interactive else { return }
+        if waitForPermissions {
+            return runPermissionContinuation(interactive: interactive, output: output)
+        }
+
+        guard interactive else { return true }
 
         var shouldContinue = true
         while shouldContinue {
@@ -289,7 +294,7 @@ public enum SetupAssistant {
             printLine(prompt(colored: true), output: output, terminator: "")
 
             guard let choice = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
-                return
+                return true
             }
 
             switch choice {
@@ -317,6 +322,58 @@ public enum SetupAssistant {
                 printLine(styled("  ✗ Unknown option: \(choice)", colored: true, "38;5;203"), output: output)
             }
         }
+        return true
+    }
+
+    private static func runPermissionContinuation(
+        interactive: Bool,
+        output: FileHandle
+    ) -> Bool {
+        guard interactive else {
+            printLine(
+                "Permission setup needs an interactive terminal. Resume with `scripts/install-macos.sh --continue-install`.",
+                output: output
+            )
+            return false
+        }
+
+        printLine("", output: output)
+        printLine("  Complete the two macOS permission steps; this installer will continue automatically.", output: output)
+        printLine("  Press Control-C to pause. Resume later with `scripts/install-macos.sh --continue-install`.", output: output)
+        printLine("  If macOS asks you to quit Accio after enabling Screen Recording, quit it and run that resume command.", output: output)
+
+        var requested = Set<SystemPermissionKind>()
+        var lastSummary = ""
+        let deadline = Date().addingTimeInterval(300)
+        while Date() < deadline {
+            let permissions = PermissionDiagnostics.current()
+            if permissions.summary != lastSummary {
+                printLine("  \(permissions.summary)", output: output)
+                lastSummary = permissions.summary
+            }
+            if permissions.allGranted {
+                printLine("  ✓ Accessibility and Screen Recording are effective.", output: output)
+                return true
+            }
+
+            if let permission = permissions.missingPermissions.first,
+               requested.insert(permission).inserted {
+                printLine("  → Requesting \(permission.title)…", output: output)
+                if permission == .screenRecording {
+                    printLine(
+                        "  macOS may require this process to quit before Screen Recording becomes effective.",
+                        output: output
+                    )
+                }
+                _ = PermissionSupport.startAuthorizationFlow(for: permission)
+                PermissionSupport.openSystemSettings(for: permission)
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(1))
+        }
+
+        printLine("  Permission setup timed out after 5 minutes.", output: output)
+        printLine("  Resume with `scripts/install-macos.sh --continue-install`.", output: output)
+        return false
     }
 
     // MARK: - IO

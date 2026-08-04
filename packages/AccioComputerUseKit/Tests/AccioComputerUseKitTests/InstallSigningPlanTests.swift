@@ -1,6 +1,71 @@
 import Foundation
 import Testing
 
+@Test("installer defaults to persistent local signing and keeps adhoc explicit")
+func installerDefaultsToLocalSigning() throws {
+    let installerURL = repositoryRoot().appendingPathComponent("scripts/install-macos.sh")
+    let installer = try String(contentsOf: installerURL, encoding: .utf8)
+
+    #expect(installer.contains("SIGNING_MODE=\"${ACCIO_SIGNING_MODE:-local}\""))
+    #expect(installer.contains("accio_ensure_local_signing_identity"))
+    #expect(installer.contains("--signing-mode MODE"))
+    #expect(installer.contains("SIGNING_IDENTITY=\"-\""))
+
+    let policyURL = repositoryRoot()
+        .appendingPathComponent("scripts/lib/install-macos-signing-policy.sh")
+    let policy = try String(contentsOf: policyURL, encoding: .utf8)
+    #expect(policy.contains("security add-trusted-cert -r trustRoot -p codeSign"))
+    #expect(!policy.contains("security add-trusted-cert -d -r trustRoot"))
+}
+
+@Test("first-run onboarding is resumable and precedes daemon installation")
+func firstRunOnboardingIsResumable() throws {
+    let installerURL = repositoryRoot().appendingPathComponent("scripts/install-macos.sh")
+    let installer = try String(contentsOf: installerURL, encoding: .utf8)
+    let continuation = try #require(installer.range(of: "finish_onboarding()"))
+    let functionBody = String(installer[continuation.lowerBound...])
+    let permissionWait = try #require(functionBody.range(of: "setup --wait-for-permissions"))
+    let daemonInstall = try #require(functionBody.range(
+        of: "scripts/install-daemon.sh\" install"
+    ))
+
+    #expect(permissionWait.lowerBound < daemonInstall.lowerBound)
+    #expect(installer.contains("--continue-install"))
+    #expect(installer.contains("--no-onboarding"))
+}
+
+@Test("local signing identity selection requires an exact unique name")
+func localSigningIdentitySelectionIsExact() throws {
+    let helperURL = repositoryRoot()
+        .appendingPathComponent("scripts/lib/install-macos-signing-policy.sh")
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = [
+        "-c",
+        """
+        source "$1"
+        security() {
+          printf '%s\\n' \\
+            '  1) 0123456789ABCDEF0123456789ABCDEF01234567 "Accio Computer Use Local Development"' \\
+            '  2) 89ABCDEF0123456789ABCDEF0123456789ABCDEF "Accio Computer Use Local Development Extra"' \\
+            '     2 valid identities found'
+        }
+        [[ "$(accio_find_exact_codesigning_identity 'Accio Computer Use Local Development' /tmp/test.keychain)" == \\
+           '0123456789ABCDEF0123456789ABCDEF01234567' ]]
+        """,
+        "bash",
+        helperURL.path,
+    ]
+    process.standardOutput = output
+    process.standardError = output
+    try process.run()
+    process.waitUntilExit()
+
+    let value = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    #expect(process.terminationStatus == 0, "identity selection failed: \(value)")
+}
+
 @Test("TCC resets only when the signing requirement changes or reset is explicit")
 func signingPlanProtectsPermissionIdentity() throws {
     #expect(try signingPlan(
@@ -33,6 +98,34 @@ func signingPlanProtectsPermissionIdentity() throws {
         previousRequirement: "designated => anchor SAME and identifier com.accio.computeruse",
         newRequirement: "designated => anchor SAME and identifier com.accio.computeruse"
     ) == "stable|reset")
+}
+
+@Test("daemon onboarding is entered only for the permission-pending exit code")
+func daemonFailureRoutingIsSpecific() throws {
+    let helperURL = repositoryRoot()
+        .appendingPathComponent("scripts/lib/install-macos-signing-policy.sh")
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = [
+        "-c",
+        """
+        source "$1"
+        [[ "$(accio_daemon_reinstall_failure_action 2 false)" == onboard ]]
+        [[ "$(accio_daemon_reinstall_failure_action 2 true)" == permission-pending ]]
+        [[ "$(accio_daemon_reinstall_failure_action 1 false)" == fail ]]
+        [[ "$(accio_daemon_reinstall_failure_action 78 false)" == fail ]]
+        """,
+        "bash",
+        helperURL.path,
+    ]
+    process.standardOutput = output
+    process.standardError = output
+    try process.run()
+    process.waitUntilExit()
+
+    let value = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    #expect(process.terminationStatus == 0, "daemon failure routing failed: \(value)")
 }
 
 @Test("TCC reset helper touches only Accio Accessibility and Screen Recording grants")

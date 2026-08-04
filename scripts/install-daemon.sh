@@ -97,6 +97,12 @@ install_daemon() {
     exit 1
   fi
 
+  if ! "$binary" permission-status; then
+    echo "Permission setup is incomplete; the LaunchAgent was not installed." >&2
+    echo "Resume with: scripts/install-macos.sh --continue-install" >&2
+    return 2
+  fi
+
   mkdir -p "$PLIST_DIR"
   mkdir -p "$LOG_DIR"
 

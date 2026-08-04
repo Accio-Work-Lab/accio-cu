@@ -33,7 +33,7 @@ Version 0.0.1 is a source-only release. Build and install it locally using the
 scripts below; the project does not currently distribute a prebuilt,
 notarized application.
 
-### 1. Install
+### Install and authorize
 
 From the repository root, run:
 
@@ -43,20 +43,41 @@ cd accio-cu
 ./scripts/install-macos.sh --verify --install-skill
 ```
 
-This installs the app-bundled `accio-computer-use` command, its Python runtime, and the Accio skill for Codex. To install the skill for Claude Code instead:
+This single command builds and signs the app, installs the CLI and skill, opens
+the two required macOS permission panes, waits for both grants, installs the
+background daemon, and verifies the installed runner. Enable **Accessibility**
+and **Screen Recording** for **Accio Computer Use** when prompted; the terminal
+continues automatically.
+
+If permission setup is interrupted or macOS asks the app to quit, resume
+without rebuilding:
+
+```bash
+./scripts/install-macos.sh --continue-install
+```
+
+To install the skill for Claude Code instead:
 
 ```bash
 ./scripts/install-macos.sh --install-skill claude
 ```
 
-The installer uses ad-hoc signing by default. A rebuilt ad-hoc app may have a
-new macOS permission identity and require Accessibility and Screen Recording
-to be granted again. To preserve the TCC identity across builds, install every
-build with the same certificate:
+The installer creates a project-specific local code-signing identity in the
+current user's login keychain on first use and reuses it for later builds. The
+first migration from an older ad-hoc build requires one permission refresh;
+subsequent rebuilds preserve the macOS TCC identity. To use an existing Apple
+or local certificate instead:
 
 ```bash
 ACCIO_CODESIGN_IDENTITY="Developer ID Application: Example (TEAMID)" \
   ./scripts/install-macos.sh --verify --install-skill
+```
+
+Ad-hoc signing is available only when explicitly requested for CI or temporary
+package checks:
+
+```bash
+./scripts/install-macos.sh --signing-mode adhoc --no-onboarding --verify
 ```
 
 To remove the app, daemon, CLI link, and Accio's scoped TCC grants:
@@ -65,24 +86,8 @@ To remove the app, daemon, CLI link, and Accio's scoped TCC grants:
 ./scripts/install-macos.sh --uninstall
 ```
 
-### 2. Grant permissions
-
-```bash
-accio-computer-use setup
-```
-
-Enable **Accessibility** and **Screen Recording** for **Accio Computer Use** in System Settings → Privacy & Security.
-
-### 3. Start the daemon
-
-```bash
-./scripts/install-daemon.sh install
-./scripts/install-daemon.sh status
-accio-computer-use daemon-status
-```
-
-Both status commands require a live current-user socket listener. A loaded
-LaunchAgent or a leftover socket file is reported as unhealthy.
+For CI or package-only builds, `--no-onboarding` skips permission UI and daemon
+installation. Normal desktop installations should not use it.
 
 Restart your agent, then give it a desktop task:
 
@@ -95,35 +100,15 @@ The installed skill handles observation, interaction, and final verification.
 
 ### Update an existing installation
 
-After pulling the latest changes, update the CLI and restart its daemon with
-the following steps:
+After pulling the latest changes, rebuild, replace the app, restart its daemon,
+and verify everything with the same command:
 
-1. Reinstall the app, CLI, and agent skill:
+```bash
+./scripts/install-macos.sh --verify --install-skill
+```
 
-   ```bash
-   ./scripts/install-macos.sh --verify --install-skill
-   ```
-
-2. Manually reconfigure **Accessibility** and **Screen Recording** permissions
-   for **Accio Computer Use** in System Settings → Privacy & Security.
-
-3. Uninstall the existing daemon:
-
-   ```bash
-   ./scripts/install-daemon.sh uninstall
-   ```
-
-4. Install the updated daemon:
-
-   ```bash
-   ./scripts/install-daemon.sh install
-   ```
-
-5. Run setup to verify the system permissions:
-
-   ```bash
-   accio-computer-use setup
-   ```
+The first migration from an older ad-hoc build asks for the two permissions
+once. Later builds signed by the persistent local identity retain them.
 
 ## One block, many tools
 

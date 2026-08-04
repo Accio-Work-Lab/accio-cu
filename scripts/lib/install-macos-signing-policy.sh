@@ -10,6 +10,106 @@ accio_validate_signing_identity() {
   fi
 }
 
+accio_default_keychain_path() {
+  local keychain
+  keychain="$(security default-keychain -d user 2>/dev/null)" || return 1
+  keychain="${keychain#\"}"
+  keychain="${keychain%\"}"
+  [[ -n "$keychain" ]] || return 1
+  printf '%s\n' "$keychain"
+}
+
+accio_find_exact_codesigning_identity() {
+  local identity_name="${1:-}"
+  local keychain="${2:-}"
+  local line
+  local hash
+  local match_count=0
+  local matched_hash=""
+
+  [[ -n "$identity_name" && -n "$keychain" ]] || return 64
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^[[:space:]]*[0-9]+\)[[:space:]]+([[:xdigit:]]{40})[[:space:]]+\"(.*)\"$ ]]; then
+      hash="${BASH_REMATCH[1]}"
+      if [[ "${BASH_REMATCH[2]}" == "$identity_name" ]]; then
+        matched_hash="$hash"
+        match_count=$((match_count + 1))
+      fi
+    fi
+  done < <(security find-identity -v -p codesigning "$keychain" 2>/dev/null)
+
+  if [[ "$match_count" -gt 1 ]]; then
+    echo "install-macos-signing-policy: multiple exact signing identities named '$identity_name'" >&2
+    return 65
+  fi
+  [[ "$match_count" -eq 1 ]] || return 1
+  printf '%s\n' "$matched_hash"
+}
+
+accio_ensure_local_signing_identity() {
+  local identity_name="${1:-Accio Computer Use Local Development}"
+  local keychain
+  local existing_hash
+  local staging_root
+  local private_key
+  local certificate
+  local archive
+  local archive_password
+  local created_hash
+  local previous_umask
+
+  keychain="$(accio_default_keychain_path)" || {
+    echo "install-macos-signing-policy: unable to locate the current user's default keychain" >&2
+    return 1
+  }
+  if existing_hash="$(accio_find_exact_codesigning_identity "$identity_name" "$keychain")"; then
+    printf '%s\n' "$existing_hash"
+    return 0
+  fi
+
+  command -v openssl >/dev/null 2>&1 || {
+    echo "install-macos-signing-policy: openssl is required to create the local signing identity" >&2
+    return 1
+  }
+  staging_root="$(mktemp -d "${TMPDIR:-/tmp}/accio-local-signing.XXXXXX")" || return 1
+  private_key="$staging_root/private-key.pem"
+  certificate="$staging_root/certificate.pem"
+  archive="$staging_root/identity.p12"
+  archive_password="$(openssl rand -hex 24)" || {
+    rm -rf -- "$staging_root"
+    return 1
+  }
+
+  previous_umask="$(umask)"
+  umask 077
+  if ! openssl req -new -newkey rsa:2048 -x509 -sha256 -days 3650 -nodes \
+      -subj "/CN=$identity_name/O=Accio Local Development" \
+      -addext "basicConstraints=critical,CA:true" \
+      -addext "keyUsage=critical,digitalSignature,keyCertSign" \
+      -addext "extendedKeyUsage=codeSigning" \
+      -keyout "$private_key" -out "$certificate" >/dev/null 2>&1 || \
+     ! openssl pkcs12 -export -inkey "$private_key" -in "$certificate" \
+      -name "$identity_name" -passout "pass:$archive_password" \
+      -out "$archive" >/dev/null 2>&1 || \
+     ! security import "$archive" -k "$keychain" -f pkcs12 \
+      -P "$archive_password" -T /usr/bin/codesign >/dev/null || \
+     ! security add-trusted-cert -r trustRoot -p codeSign -k "$keychain" \
+      "$certificate" >/dev/null; then
+    umask "$previous_umask"
+    rm -rf -- "$staging_root"
+    echo "install-macos-signing-policy: failed to create the local signing identity" >&2
+    return 1
+  fi
+  umask "$previous_umask"
+  rm -rf -- "$staging_root"
+
+  created_hash="$(accio_find_exact_codesigning_identity "$identity_name" "$keychain")" || {
+    echo "install-macos-signing-policy: the new local identity is not available for code signing" >&2
+    return 1
+  }
+  printf '%s\n' "$created_hash"
+}
+
 accio_designated_requirement() {
   local app_path="${1:-}"
   local output
@@ -54,6 +154,30 @@ accio_signing_plan() {
   fi
 
   printf '%s|%s\n' "$mode" "$permission_action"
+}
+
+accio_daemon_reinstall_failure_action() {
+  local exit_status="${1:-}"
+  local no_onboarding="${2:-false}"
+
+  if [[ ! "$exit_status" =~ ^[0-9]+$ ]] || [[ "$exit_status" -eq 0 ]]; then
+    echo "install-macos-signing-policy: daemon failure status must be nonzero" >&2
+    return 64
+  fi
+  if [[ "$no_onboarding" != "true" && "$no_onboarding" != "false" ]]; then
+    echo "install-macos-signing-policy: no-onboarding must be true or false" >&2
+    return 64
+  fi
+
+  if [[ "$exit_status" -eq 2 ]]; then
+    if [[ "$no_onboarding" == "true" ]]; then
+      printf 'permission-pending\n'
+    else
+      printf 'onboard\n'
+    fi
+  else
+    printf 'fail\n'
+  fi
 }
 
 accio_validate_stable_requirement() {
