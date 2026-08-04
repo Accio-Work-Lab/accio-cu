@@ -266,7 +266,7 @@ finish_onboarding() {
   echo "Starting first-run permission setup."
   echo "If interrupted, resume without rebuilding: ./scripts/install-macos.sh --continue-install"
   echo "Opening the Accio app permission window. Its status is authoritative for the app and LaunchAgent identity."
-  /usr/bin/open -n "$APP_BUNDLE" || {
+  /usr/bin/open "$APP_BUNDLE" || {
     echo "install-macos.sh: unable to open the Accio permission window" >&2
     return 1
   }

@@ -300,6 +300,8 @@ func verificationRespectsDaemonInstallScope() throws {
     #expect(installer.contains("$NO_ONBOARDING\" != true && ! -f \"$DAEMON_PLIST\""))
     #expect(!installer.contains("! -f \"$DAEMON_PLIST\" || \"$VERIFY\" == true"))
     #expect(installer.contains("Opening the Accio app permission window"))
+    #expect(installer.contains("/usr/bin/open \"$APP_BUNDLE\""))
+    #expect(!installer.contains("/usr/bin/open -n \"$APP_BUNDLE\""))
     let verifyBlock = try #require(installer.range(of: "if [[ \"$VERIFY\" == true ]]"))
     let verifyBody = String(installer[verifyBlock.lowerBound...])
     #expect(verifyBody.contains("Running persistent daemon health check..."))
