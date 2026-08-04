@@ -16,6 +16,9 @@ func installerDefaultsToLocalSigning() throws {
     let policy = try String(contentsOf: policyURL, encoding: .utf8)
     #expect(policy.contains("security add-trusted-cert -r trustRoot -p codeSign"))
     #expect(!policy.contains("security add-trusted-cert -d -r trustRoot"))
+    #expect(policy.contains("AccioComputerUseLocal.keychain-db"))
+    #expect(policy.contains("signing-keychain-password"))
+    #expect(policy.contains("accio_add_keychain_to_user_search_list"))
 }
 
 @Test("first-run onboarding is resumable and precedes daemon installation")
@@ -64,6 +67,70 @@ func localSigningIdentitySelectionIsExact() throws {
 
     let value = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
     #expect(process.terminationStatus == 0, "identity selection failed: \(value)")
+}
+
+@Test("local signing uses an isolated persistent keychain and preserves the search list")
+func localSigningKeychainIsIsolatedAndSearchable() throws {
+    let helperURL = repositoryRoot()
+        .appendingPathComponent("scripts/lib/install-macos-signing-policy.sh")
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = [
+        "-c",
+        """
+        source "$1"
+        test_home="$(mktemp -d '/tmp/accio signing home.XXXXXX')"
+        trap 'rm -rf "$test_home"' EXIT
+        export HOME="$test_home"
+        calls="$test_home/security-calls"
+        security() {
+          printf '%s\n' "$*" >> "$calls"
+          case "$1 $2" in
+            'create-keychain -p')
+              mkdir -p "$(dirname "${@: -1}")"
+              touch "${@: -1}"
+              ;;
+            'list-keychains -d')
+              if [[ "$4" == -s ]]; then
+                touch "$test_home/search-list-contains-accio"
+              elif [[ -f "$test_home/search-list-contains-accio" ]]; then
+                printf '    "%s"\n    "%s"\n' \
+                  "$test_home/Library/Keychains/login.keychain-db" \
+                  "$test_home/Library/Keychains/AccioComputerUseLocal.keychain-db"
+              else
+                printf '    "%s"\n' "$test_home/Library/Keychains/login.keychain-db"
+              fi
+              ;;
+            'unlock-keychain -p') ;;
+            *) return 64 ;;
+          esac
+        }
+
+        keychain="$(accio_prepare_local_signing_keychain)"
+        [[ "$keychain" == "$test_home/Library/Keychains/AccioComputerUseLocal.keychain-db" ]]
+        [[ -f "$keychain" ]]
+        password_file="$test_home/Library/Application Support/AccioComputerUse/signing-keychain-password"
+        [[ -s "$password_file" ]]
+        [[ "$(stat -f '%Lp' "$password_file")" == 600 ]]
+        grep -Fq "list-keychains -d user -s $test_home/Library/Keychains/login.keychain-db $keychain" "$calls"
+
+        before="$(wc -l < "$calls")"
+        keychain_again="$(accio_prepare_local_signing_keychain)"
+        after="$(wc -l < "$calls")"
+        [[ "$keychain_again" == "$keychain" ]]
+        [[ "$((after - before))" -eq 2 ]]
+        """,
+        "bash",
+        helperURL.path,
+    ]
+    process.standardOutput = output
+    process.standardError = output
+    try process.run()
+    process.waitUntilExit()
+
+    let value = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    #expect(process.terminationStatus == 0, "local signing keychain setup failed: \(value)")
 }
 
 @Test("TCC resets only when the signing requirement changes or reset is explicit")

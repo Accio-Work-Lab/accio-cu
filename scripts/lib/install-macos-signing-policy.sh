@@ -19,6 +19,81 @@ accio_default_keychain_path() {
   printf '%s\n' "$keychain"
 }
 
+accio_local_signing_keychain_path() {
+  printf '%s\n' "$HOME/Library/Keychains/AccioComputerUseLocal.keychain-db"
+}
+
+accio_local_signing_password_path() {
+  printf '%s\n' "$HOME/Library/Application Support/AccioComputerUse/signing-keychain-password"
+}
+
+accio_add_keychain_to_user_search_list() {
+  local keychain="${1:-}"
+  local line
+  local existing
+  local -a keychains=()
+
+  [[ -n "$keychain" ]] || return 64
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    existing="${line#\"}"
+    existing="${existing%\"}"
+    [[ -n "$existing" ]] || continue
+    keychains+=("$existing")
+    if [[ "$existing" == "$keychain" ]]; then
+      return 0
+    fi
+  done < <(security list-keychains -d user 2>/dev/null)
+
+  security list-keychains -d user -s "${keychains[@]}" "$keychain"
+}
+
+accio_prepare_local_signing_keychain() {
+  local keychain
+  local password_path
+  local password
+  local password_dir
+  local previous_umask
+
+  keychain="$(accio_local_signing_keychain_path)"
+  password_path="$(accio_local_signing_password_path)"
+  password_dir="$(dirname "$password_path")"
+
+  if [[ -f "$keychain" && ! -f "$password_path" ]]; then
+    echo "install-macos-signing-policy: Accio signing keychain exists but its password file is missing: $keychain" >&2
+    return 1
+  fi
+  if [[ ! -f "$keychain" ]]; then
+    mkdir -p "$password_dir"
+    password="$(openssl rand -hex 32)" || return 1
+    previous_umask="$(umask)"
+    umask 077
+    printf '%s\n' "$password" > "$password_path"
+    umask "$previous_umask"
+    if ! security create-keychain -p "$password" "$keychain"; then
+      echo "install-macos-signing-policy: failed to create Accio's local signing keychain" >&2
+      return 1
+    fi
+  else
+    password="$(tr -d '\r\n' < "$password_path")"
+  fi
+  chmod 600 "$password_path"
+
+  [[ -n "$password" ]] || {
+    echo "install-macos-signing-policy: Accio signing keychain password file is empty" >&2
+    return 1
+  }
+  security unlock-keychain -p "$password" "$keychain" || {
+    echo "install-macos-signing-policy: failed to unlock Accio's local signing keychain" >&2
+    return 1
+  }
+  accio_add_keychain_to_user_search_list "$keychain" || {
+    echo "install-macos-signing-policy: failed to add Accio's keychain to the user search list" >&2
+    return 1
+  }
+  printf '%s\n' "$keychain"
+}
+
 accio_find_exact_codesigning_identity() {
   local identity_name="${1:-}"
   local keychain="${2:-}"
@@ -57,12 +132,10 @@ accio_ensure_local_signing_identity() {
   local archive_password
   local created_hash
   local previous_umask
+  local default_keychain
 
-  keychain="$(accio_default_keychain_path)" || {
-    echo "install-macos-signing-policy: unable to locate the current user's default keychain" >&2
-    return 1
-  }
-  if existing_hash="$(accio_find_exact_codesigning_identity "$identity_name" "$keychain")"; then
+  if default_keychain="$(accio_default_keychain_path)" && \
+     existing_hash="$(accio_find_exact_codesigning_identity "$identity_name" "$default_keychain")"; then
     printf '%s\n' "$existing_hash"
     return 0
   fi
@@ -71,6 +144,11 @@ accio_ensure_local_signing_identity() {
     echo "install-macos-signing-policy: openssl is required to create the local signing identity" >&2
     return 1
   }
+  keychain="$(accio_prepare_local_signing_keychain)" || return 1
+  if existing_hash="$(accio_find_exact_codesigning_identity "$identity_name" "$keychain")"; then
+    printf '%s\n' "$existing_hash"
+    return 0
+  fi
   staging_root="$(mktemp -d "${TMPDIR:-/tmp}/accio-local-signing.XXXXXX")" || return 1
   private_key="$staging_root/private-key.pem"
   certificate="$staging_root/certificate.pem"

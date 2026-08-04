@@ -62,8 +62,8 @@ To install the skill for Claude Code instead:
 ./scripts/install-macos.sh --install-skill claude
 ```
 
-The installer creates a project-specific local code-signing identity in the
-current user's login keychain on first use and reuses it for later builds. The
+The installer creates a project-specific local code-signing identity in an
+Accio-owned user keychain on first use and reuses it for later builds. The
 first migration from an older ad-hoc build requires one permission refresh;
 subsequent rebuilds preserve the macOS TCC identity. To use an existing Apple
 or local certificate instead:
