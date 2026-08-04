@@ -47,7 +47,9 @@ This single command builds and signs the app, installs the CLI and skill, opens
 the two required macOS permission panes, waits for both grants, installs the
 background daemon, and verifies the installed runner. Enable **Accessibility**
 and **Screen Recording** for **Accio Computer Use** when prompted; the terminal
-continues automatically.
+continues automatically. The installer may show the Accio permission window
+alongside its terminal guide; the App window is authoritative for the App and
+LaunchAgent permission identity.
 
 If permission setup is interrupted or macOS asks the app to quit, resume
 without rebuilding:
@@ -87,7 +89,11 @@ To remove the app, daemon, CLI link, and Accio's scoped TCC grants:
 ```
 
 For CI or package-only builds, `--no-onboarding` skips permission UI and daemon
-installation. Normal desktop installations should not use it.
+installation. `--verify` still checks the installed App, CLI, signature, and
+runner in this mode, but intentionally skips daemon health when no daemon was
+running before installation. An already-loaded daemon is still restarted and
+verified so an upgrade does not silently break the existing service. Normal
+desktop installations should not use this mode.
 
 Restart your agent, then give it a desktop task:
 

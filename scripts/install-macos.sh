@@ -265,6 +265,11 @@ finish_onboarding() {
 
   echo "Starting first-run permission setup."
   echo "If interrupted, resume without rebuilding: ./scripts/install-macos.sh --continue-install"
+  echo "Opening the Accio app permission window. Its status is authoritative for the app and LaunchAgent identity."
+  /usr/bin/open -n "$APP_BUNDLE" || {
+    echo "install-macos.sh: unable to open the Accio permission window" >&2
+    return 1
+  }
   if ! env -u ACCIO_COMPUTER_USE_CODING_RUNNER \
       "$app_binary" setup --wait-for-permissions; then
     echo "Installation is complete, but permission setup is pending." >&2
@@ -273,7 +278,20 @@ finish_onboarding() {
   fi
 
   echo "Installing and verifying the background daemon..."
-  ACCIO_COMPUTER_USE_BINARY="$app_binary" "$REPO_ROOT/scripts/install-daemon.sh" install
+  local daemon_status=0
+  if ACCIO_COMPUTER_USE_BINARY="$app_binary" \
+      "$REPO_ROOT/scripts/install-daemon.sh" install; then
+    :
+  else
+    daemon_status=$?
+    if [[ "$daemon_status" -eq 2 ]]; then
+      echo "The LaunchAgent still sees missing permissions." >&2
+      echo "Complete both grants in the opened Accio window, then resume with:" >&2
+      echo "  ./scripts/install-macos.sh --continue-install" >&2
+      return 2
+    fi
+    return "$daemon_status"
+  fi
   "$REPO_ROOT/scripts/install-daemon.sh" status
   installed_runner_smoke_test "$app_binary"
   echo "Accio Computer Use installation is complete."
@@ -787,8 +805,8 @@ acting. For script-only diagnostics, run:
 
   accio-computer-use doctor
 
-The default local signing mode creates and reuses an identity in your login
-keychain so permissions survive rebuilds. You may instead install every build
+The default local signing mode creates and reuses an identity in an Accio-owned
+user keychain so permissions survive rebuilds. You may instead install every build
 with the same --signing-identity (or ACCIO_CODESIGN_IDENTITY). The installer
 compares old and new designated requirements. Ad-hoc installs always reset only
 Accio's two grants; persistent identities reset them only when changed or
@@ -810,6 +828,12 @@ if [[ "$VERIFY" == true ]]; then
       exit 1
     fi
     DAEMON_RESTART_HEALTHY=true
+    echo ""
+  elif [[ "$NO_ONBOARDING" == true ]]; then
+    echo "Skipping persistent daemon health check: --no-onboarding did not request daemon installation."
+    echo ""
+  else
+    echo "Skipping persistent daemon health check: the LaunchAgent was intentionally unloaded before installation."
     echo ""
   fi
   echo "Running coding runner smoke test through the installed CLI path..."

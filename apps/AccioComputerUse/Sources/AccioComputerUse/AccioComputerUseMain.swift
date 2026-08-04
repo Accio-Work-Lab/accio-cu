@@ -19,6 +19,10 @@ enum AccioComputerUseMain {
             writeToStandardError(error.errorDescription ?? String(describing: error))
             ActivitySocketClient.flush()
             exit(EXIT_FAILURE)
+        } catch let error as DaemonStartupError {
+            writeToStandardError(error.errorDescription ?? String(describing: error))
+            ActivitySocketClient.flush()
+            exit(error.exitCode)
         } catch {
             let message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
             writeToStandardError(message)
@@ -75,11 +79,9 @@ enum AccioComputerUseMain {
 
         case let .serve(socketPath):
             let path = socketPath ?? DaemonServer.defaultSocketPath
-            // Daemon/server modes must not show modal permission alerts: they
-            // are often launched by LaunchAgent or a background helper, where a
-            // stuck alert blocks the server. `setup` and the menu bar helper
-            // own interactive authorization.
-            PermissionSupport.logAuthorizationStatus()
+            // Daemon/server modes must not show modal permission alerts. The
+            // server throws a permission-pending error with exit status 2 so
+            // the installer can start interactive onboarding instead.
             let service = ComputerUseService()
             let daemon = DaemonServer(socketPath: path, service: service)
             try daemon.run()

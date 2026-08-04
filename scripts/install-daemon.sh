@@ -89,6 +89,12 @@ wait_for_daemon_health() {
   return 1
 }
 
+launch_agent_last_exit_code() {
+  local launch_state
+  launch_state="$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null)" || return 1
+  printf '%s\n' "$launch_state" | awk -F'= ' '/last exit code =/{print $2; exit}'
+}
+
 install_daemon() {
   local binary
   local health_status=0
@@ -148,10 +154,24 @@ EOF
   if wait_for_daemon_health; then
     echo "Daemon started and health check passed. Socket: $SOCKET_PATH"
   else
-    health_status=1
-    echo "WARNING: LaunchAgent loaded, but the daemon is not healthy." >&2
-    echo "Refresh Accessibility and Screen Recording, restart the helper, then retry." >&2
-    echo "Run: $0 status" >&2
+    local last_exit
+    last_exit="$(launch_agent_last_exit_code || true)"
+    if [[ "$last_exit" == "2" ]]; then
+      if launchctl bootout "gui/$(id -u)/$LABEL"; then
+        rm -f "$SOCKET_PATH" "$PLIST_PATH"
+        health_status=2
+        echo "Permission setup is incomplete in the LaunchAgent runtime." >&2
+        echo "The installer will continue with interactive onboarding." >&2
+      else
+        health_status=1
+        echo "WARNING: permission setup is incomplete, and the unhealthy LaunchAgent could not be stopped." >&2
+        echo "Run: launchctl bootout gui/$(id -u)/$LABEL" >&2
+      fi
+    else
+      health_status=1
+      echo "WARNING: LaunchAgent loaded, but the daemon is not healthy." >&2
+      echo "Run: $0 status" >&2
+    fi
   fi
   echo "Logs: $LOG_DIR/daemon.log"
   echo ""
@@ -196,6 +216,9 @@ status_daemon() {
     fi
     echo "LaunchAgent is loaded, but no live current-user listener is available."
     echo "Logs: $LOG_DIR/daemon.err"
+    if [[ "$last_exit" == "2" ]]; then
+      return 2
+    fi
     return 1
   fi
 
