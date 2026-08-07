@@ -1,4 +1,5 @@
 import Darwin
+import Foundation
 import Testing
 @testable import AccioComputerUseKit
 
@@ -46,8 +47,23 @@ func codeHelpUsesSinglePublicCommand() {
 
 @Test("setup and tui commands open the setup assistant")
 func setupAndTUICommandsOpenSetupAssistant() throws {
-    #expect(try parseCLI(arguments: ["setup"]) == .setup)
-    #expect(try parseCLI(arguments: ["tui"]) == .setup)
+    #expect(try parseCLI(arguments: ["setup"]) == .setup(waitForPermissions: false))
+    #expect(try parseCLI(arguments: ["tui"]) == .setup(waitForPermissions: false))
+    #expect(
+        try parseCLI(arguments: ["setup", "--wait-for-permissions"])
+            == .setup(waitForPermissions: true)
+    )
+    #expect(throws: CLIError.self) {
+        try parseCLI(arguments: ["setup", "--unknown"])
+    }
+}
+
+@Test("permission status is a strict internal readiness probe")
+func permissionStatusIsStrictReadinessProbe() throws {
+    #expect(try parseCLI(arguments: ["permission-status"]) == .permissionStatus)
+    #expect(throws: CLIError.self) {
+        try parseCLI(arguments: ["permission-status", "extra"])
+    }
 }
 
 @Test("daemon status accepts an optional socket path")
@@ -101,10 +117,30 @@ func setupHelpIsRecommendedOnboardingEntry() {
     let setupHelp = helpText(command: "setup")
     #expect(setupHelp.contains("accio-computer-use setup"))
     #expect(setupHelp.contains("permissions"))
+    #expect(setupHelp.contains("--wait-for-permissions"))
     #expect(setupHelp.contains("app"))
     #expect(setupHelp.contains("permission container"))
     #expect(setupHelp.contains("System Settings' app lists is expected"))
     #expect(setupHelp.contains("MCP"))
+}
+
+@Test("permission continuation explains restart recovery and has a bounded wait")
+func permissionContinuationIsBoundedAndResumable() throws {
+    let sourceURL = setupRepositoryRoot()
+        .appendingPathComponent("packages/AccioComputerUseKit/Sources/AccioComputerUseKit/SetupAssistant.swift")
+    let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+    #expect(source.contains("Date().addingTimeInterval(300)"))
+    #expect(source.contains("asks you to quit Accio"))
+    #expect(source.contains("--continue-install"))
+}
+
+private func setupRepositoryRoot() -> URL {
+    var url = URL(fileURLWithPath: #filePath)
+    for _ in 0..<5 {
+        url.deleteLastPathComponent()
+    }
+    return url
 }
 
 @Test("doctor help points users to setup for interactive permission work")

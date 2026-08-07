@@ -4,6 +4,21 @@ import Foundation
 // Access is safe: written once before signals can fire, read only in signal handlers.
 nonisolated(unsafe) private var _daemonServerFD: Int32 = -1
 
+public enum DaemonStartupError: Error, LocalizedError, Equatable {
+    case permissionsPending([SystemPermissionKind])
+
+    public var exitCode: Int32 { 2 }
+
+    public var errorDescription: String? {
+        switch self {
+        case .permissionsPending(let permissions):
+            let names = permissions.map(\.title).joined(separator: ", ")
+            return "Daemon refusing to start: missing effective permission(s): \(names). "
+                + "Run `accio-computer-use setup --wait-for-permissions`."
+        }
+    }
+}
+
 public final class DaemonServer: @unchecked Sendable {
     public static let defaultSocketDirectory = "/tmp/accio-computer-use-\(getuid())"
     public static let defaultSocketPath = "\(defaultSocketDirectory)/daemon.sock"
@@ -29,19 +44,8 @@ public final class DaemonServer: @unchecked Sendable {
         // TCC database entries may not be effective for LaunchAgent processes
         // on macOS 15+, leading to degraded responses (elements=0, no screenshot).
         let runtimePerms = PermissionDiagnostics.runtimeProbe()
-        if !runtimePerms.accessibilityTrusted {
-            FileHandle.standardError.write(Data(
-                "Daemon refusing to start: Accessibility not effective at runtime. "
-                .appending("Run `accio-computer-use doctor` from a terminal with granted permissions, ")
-                .appending("or use `accio-computer-use call --no-daemon` instead.\n")
-                .utf8
-            ))
-            exit(1)
-        }
-        if !runtimePerms.screenCaptureGranted {
-            FileHandle.standardError.write(Data(
-                "Warning: Screen Recording not effective at runtime. Screenshots will be unavailable.\n".utf8
-            ))
+        if !runtimePerms.allGranted {
+            throw DaemonStartupError.permissionsPending(runtimePerms.missingPermissions)
         }
 
         try bindSocket()

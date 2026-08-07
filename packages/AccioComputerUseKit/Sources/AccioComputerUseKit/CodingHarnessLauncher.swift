@@ -2,16 +2,23 @@ import Darwin
 import Foundation
 
 public enum CodingHarnessLaunchError: LocalizedError, Equatable {
-    case runnerNotFound
+    case runnerNotFound(executablePath: String, searchedPaths: [String])
     case launchFailed(String)
 
     public var errorDescription: String? {
         switch self {
-        case .runnerNotFound:
+        case let .runnerNotFound(executablePath, searchedPaths):
+            let candidates = searchedPaths.isEmpty
+                ? "  (no runner candidates were available)"
+                : searchedPaths.map { "  \($0)" }.joined(separator: "\n")
             return """
-            Accio's internal Python runner was not found. Reinstall with \
-            `scripts/install-macos.sh`, or set ACCIO_COMPUTER_USE_CODING_RUNNER \
-            to a source checkout's coding/runner.py.
+            Accio's internal Python runner could not be read.
+            Executable: \(executablePath)
+            Searched:
+            \(candidates)
+            Reinstall with `scripts/install-macos.sh --verify`. If `command -v \
+            accio-computer-use` resolves to an old copy, remove that PATH entry. \
+            Use ACCIO_COMPUTER_USE_CODING_RUNNER only for deliberate source-checkout development.
             """
         case let .launchFailed(message):
             return "Failed to start Accio's Python runner: \(message)"
@@ -80,6 +87,18 @@ public enum CodingHarnessLauncher {
         currentDirectoryURL: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
         fileManager: FileManager = .default
     ) -> URL? {
+        runnerCandidates(
+            environment: environment,
+            bundleResourceURL: bundleResourceURL,
+            executableURL: executableURL
+        ).first { fileManager.isReadableFile(atPath: $0.path) }
+    }
+
+    public static func runnerCandidates(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        bundleResourceURL: URL? = Bundle.main.resourceURL,
+        executableURL: URL = processExecutableURL()
+    ) -> [URL] {
         let environmentRunner = environment[runnerEnvironmentKey]
             .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
         let bundleRunner = bundleResourceURL.map {
@@ -100,7 +119,8 @@ public enum CodingHarnessLauncher {
             installedRunner,
             checkoutRunner,
         ].compactMap { $0 }
-        return candidates.first { fileManager.isReadableFile(atPath: $0.path) }
+        var seen = Set<String>()
+        return candidates.filter { seen.insert($0.standardizedFileURL.path).inserted }
     }
 
     private static func sourceCheckoutRunnerURL(for executableURL: URL) -> URL? {
@@ -121,8 +141,15 @@ public enum CodingHarnessLauncher {
 
     @discardableResult
     public static func run(arguments: [String]) throws -> Int32 {
-        guard let runner = runnerURL() else {
-            throw CodingHarnessLaunchError.runnerNotFound
+        let executableURL = processExecutableURL()
+        let candidates = runnerCandidates(executableURL: executableURL)
+        guard let runner = candidates.first(where: {
+            FileManager.default.isReadableFile(atPath: $0.path)
+        }) else {
+            throw CodingHarnessLaunchError.runnerNotFound(
+                executablePath: executableURL.path,
+                searchedPaths: candidates.map(\.path)
+            )
         }
 
         let process = Process()

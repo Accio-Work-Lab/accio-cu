@@ -2,6 +2,14 @@ import Foundation
 import Testing
 @testable import AccioComputerUseKit
 
+@Test("daemon permission failures use the onboarding exit status")
+func daemonPermissionFailureUsesOnboardingExitStatus() {
+    let error = DaemonStartupError.permissionsPending([.accessibility, .screenRecording])
+    #expect(error.exitCode == 2)
+    #expect(error.errorDescription?.contains("Accessibility, Screen Recording") == true)
+    #expect(error.errorDescription?.contains("setup --wait-for-permissions") == true)
+}
+
 @MainActor
 @Test("Daemon event loop leaves the main queue available to action handlers")
 func daemonEventLoopLeavesMainQueueAvailable() {

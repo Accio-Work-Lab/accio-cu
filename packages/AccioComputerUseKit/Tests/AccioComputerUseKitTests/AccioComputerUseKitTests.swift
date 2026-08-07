@@ -3,4 +3,5 @@ import Testing
 
 @Test func versionIsNonEmpty() {
     #expect(!accioComputerUseVersion.isEmpty)
+    #expect(accioBuildRevisionKey == "AccioBuildRevision")
 }

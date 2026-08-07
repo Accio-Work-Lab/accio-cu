@@ -1,6 +1,211 @@
 import Foundation
 import Testing
 
+@Test("installer defaults to persistent local signing and keeps adhoc explicit")
+func installerDefaultsToLocalSigning() throws {
+    let installerURL = repositoryRoot().appendingPathComponent("scripts/install-macos.sh")
+    let installer = try String(contentsOf: installerURL, encoding: .utf8)
+
+    #expect(installer.contains("SIGNING_MODE=\"${ACCIO_SIGNING_MODE:-local}\""))
+    #expect(installer.contains("accio_ensure_local_signing_identity"))
+    #expect(installer.contains("--signing-mode MODE"))
+    #expect(installer.contains("SIGNING_IDENTITY=\"-\""))
+
+    let policyURL = repositoryRoot()
+        .appendingPathComponent("scripts/lib/install-macos-signing-policy.sh")
+    let policy = try String(contentsOf: policyURL, encoding: .utf8)
+    #expect(policy.contains("security add-trusted-cert -r trustRoot -p codeSign"))
+    #expect(!policy.contains("security add-trusted-cert -d -r trustRoot"))
+    #expect(policy.contains("AccioComputerUseLocal.keychain-db"))
+    #expect(policy.contains("signing-keychain-password"))
+    #expect(policy.contains("accio_add_keychain_to_user_search_list"))
+    #expect(policy.contains("security set-key-partition-list"))
+    #expect(policy.contains("apple-tool:,apple:,codesign:"))
+    #expect(!policy.contains("security import \"$archive\" -A"))
+}
+
+@Test("first-run onboarding is resumable and precedes daemon installation")
+func firstRunOnboardingIsResumable() throws {
+    let installerURL = repositoryRoot().appendingPathComponent("scripts/install-macos.sh")
+    let installer = try String(contentsOf: installerURL, encoding: .utf8)
+    let continuation = try #require(installer.range(of: "finish_onboarding()"))
+    let functionBody = String(installer[continuation.lowerBound...])
+    let permissionWait = try #require(functionBody.range(of: "setup --wait-for-permissions"))
+    let daemonInstall = try #require(functionBody.range(
+        of: "scripts/install-daemon.sh\" install"
+    ))
+
+    #expect(permissionWait.lowerBound < daemonInstall.lowerBound)
+    #expect(installer.contains("--continue-install"))
+    #expect(installer.contains("--no-onboarding"))
+}
+
+@Test("local signing identity selection requires an exact unique name")
+func localSigningIdentitySelectionIsExact() throws {
+    let helperURL = repositoryRoot()
+        .appendingPathComponent("scripts/lib/install-macos-signing-policy.sh")
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = [
+        "-c",
+        """
+        source "$1"
+        security() {
+          printf '%s\\n' \\
+            '  1) 0123456789ABCDEF0123456789ABCDEF01234567 "Accio Computer Use Local Development"' \\
+            '  2) 89ABCDEF0123456789ABCDEF0123456789ABCDEF "Accio Computer Use Local Development Extra"' \\
+            '     2 valid identities found'
+        }
+        [[ "$(accio_find_exact_codesigning_identity 'Accio Computer Use Local Development' /tmp/test.keychain)" == \\
+           '0123456789ABCDEF0123456789ABCDEF01234567' ]]
+        """,
+        "bash",
+        helperURL.path,
+    ]
+    process.standardOutput = output
+    process.standardError = output
+    try process.run()
+    process.waitUntilExit()
+
+    let value = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    #expect(process.terminationStatus == 0, "identity selection failed: \(value)")
+}
+
+@Test("local signing uses an isolated persistent keychain and preserves the search list")
+func localSigningKeychainIsIsolatedAndSearchable() throws {
+    let helperURL = repositoryRoot()
+        .appendingPathComponent("scripts/lib/install-macos-signing-policy.sh")
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = [
+        "-c",
+        """
+        source "$1"
+        test_home="$(mktemp -d '/tmp/accio signing home.XXXXXX')"
+        trap 'rm -rf "$test_home"' EXIT
+        export HOME="$test_home"
+        calls="$test_home/security-calls"
+        private_dir="$test_home/Library/Application Support/AccioComputerUse"
+        mkdir -p "$private_dir"
+        chmod 755 "$private_dir"
+        security() {
+          printf '%s\n' "$*" >> "$calls"
+          case "$1 $2" in
+            'create-keychain -p')
+              mkdir -p "$(dirname "${@: -1}")"
+              touch "${@: -1}"
+              ;;
+            'list-keychains -d')
+              if [[ "$4" == -s ]]; then
+                touch "$test_home/search-list-contains-accio"
+              elif [[ -f "$test_home/search-list-contains-accio" ]]; then
+                printf '    "%s"\n    "%s"\n' \
+                  "$test_home/Library/Keychains/login.keychain-db" \
+                  "$test_home/Library/Keychains/AccioComputerUseLocal.keychain-db"
+              else
+                printf '    "%s"\n' "$test_home/Library/Keychains/login.keychain-db"
+              fi
+              ;;
+            'unlock-keychain -p') ;;
+            *) return 64 ;;
+          esac
+        }
+
+        keychain="$(accio_prepare_local_signing_keychain)"
+        [[ "$keychain" == "$test_home/Library/Keychains/AccioComputerUseLocal.keychain-db" ]]
+        [[ -f "$keychain" ]]
+        password_file="$test_home/Library/Application Support/AccioComputerUse/signing-keychain-password"
+        [[ -s "$password_file" ]]
+        [[ "$(stat -f '%Lp' "$password_file")" == 600 ]]
+        [[ "$(stat -f '%Lp' "$private_dir")" == 700 ]]
+        grep -Fq "list-keychains -d user -s $test_home/Library/Keychains/login.keychain-db $keychain" "$calls"
+
+        before="$(wc -l < "$calls")"
+        keychain_again="$(accio_prepare_local_signing_keychain)"
+        after="$(wc -l < "$calls")"
+        [[ "$keychain_again" == "$keychain" ]]
+        [[ "$((after - before))" -eq 2 ]]
+        """,
+        "bash",
+        helperURL.path,
+    ]
+    process.standardOutput = output
+    process.standardError = output
+    try process.run()
+    process.waitUntilExit()
+
+    let value = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    #expect(process.terminationStatus == 0, "local signing keychain setup failed: \(value)")
+}
+
+@Test("local signing refuses a symlinked private support directory")
+func localSigningRejectsSymlinkedPrivateDirectory() throws {
+    let helperURL = repositoryRoot()
+        .appendingPathComponent("scripts/lib/install-macos-signing-policy.sh")
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = [
+        "-c",
+        """
+        source "$1"
+        test_root="$(mktemp -d /tmp/accio-private-directory.XXXXXX)"
+        trap 'rm -rf "$test_root"' EXIT
+        mkdir "$test_root/target"
+        ln -s "$test_root/target" "$test_root/private"
+        ! accio_prepare_private_directory "$test_root/private"
+        """,
+        "bash",
+        helperURL.path,
+    ]
+    process.standardOutput = output
+    process.standardError = output
+    try process.run()
+    process.waitUntilExit()
+
+    let value = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    #expect(process.terminationStatus == 0, "unsafe private directory was accepted: \(value)")
+}
+
+@Test("existing local signing keys receive non-interactive codesign access")
+func existingLocalSigningKeyAccessIsRepaired() throws {
+    let helperURL = repositoryRoot()
+        .appendingPathComponent("scripts/lib/install-macos-signing-policy.sh")
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = [
+        "-c",
+        """
+        source "$1"
+        accio_default_keychain_path() { return 1; }
+        accio_prepare_local_signing_keychain() { printf '/tmp/AccioComputerUseLocal.keychain-db\n'; }
+        accio_local_signing_keychain_password() { printf 'test-password\n'; }
+        accio_find_exact_codesigning_identity() { printf '0123456789ABCDEF0123456789ABCDEF01234567\n'; }
+        security() { printf '%s\n' "$*" >> "$calls"; }
+
+        calls="$(mktemp /tmp/accio-key-access.XXXXXX)"
+        trap 'rm -f "$calls"' EXIT
+        hash="$(accio_ensure_local_signing_identity 'Accio Computer Use Local Development')"
+        [[ "$hash" == 0123456789ABCDEF0123456789ABCDEF01234567 ]]
+        grep -Fxq \
+          'set-key-partition-list -S apple-tool:,apple:,codesign: -s -k test-password /tmp/AccioComputerUseLocal.keychain-db' \
+          "$calls"
+        """,
+        "bash",
+        helperURL.path,
+    ]
+    process.standardOutput = output
+    process.standardError = output
+    try process.run()
+    process.waitUntilExit()
+
+    let value = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    #expect(process.terminationStatus == 0, "codesign key access repair failed: \(value)")
+}
+
 @Test("TCC resets only when the signing requirement changes or reset is explicit")
 func signingPlanProtectsPermissionIdentity() throws {
     #expect(try signingPlan(
@@ -33,6 +238,82 @@ func signingPlanProtectsPermissionIdentity() throws {
         previousRequirement: "designated => anchor SAME and identifier com.accio.computeruse",
         newRequirement: "designated => anchor SAME and identifier com.accio.computeruse"
     ) == "stable|reset")
+}
+
+@Test("daemon onboarding is entered only for the permission-pending exit code")
+func daemonFailureRoutingIsSpecific() throws {
+    let helperURL = repositoryRoot()
+        .appendingPathComponent("scripts/lib/install-macos-signing-policy.sh")
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = [
+        "-c",
+        """
+        source "$1"
+        [[ "$(accio_daemon_reinstall_failure_action 2 false)" == onboard ]]
+        [[ "$(accio_daemon_reinstall_failure_action 2 true)" == permission-pending ]]
+        [[ "$(accio_daemon_reinstall_failure_action 1 false)" == fail ]]
+        [[ "$(accio_daemon_reinstall_failure_action 78 false)" == fail ]]
+        """,
+        "bash",
+        helperURL.path,
+    ]
+    process.standardOutput = output
+    process.standardError = output
+    try process.run()
+    process.waitUntilExit()
+
+    let value = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    #expect(process.terminationStatus == 0, "daemon failure routing failed: \(value)")
+}
+
+@Test("LaunchAgent permission exits are propagated to installer onboarding")
+func launchAgentPermissionExitIsPropagated() throws {
+    let daemonInstaller = try String(
+        contentsOf: repositoryRoot().appendingPathComponent("scripts/install-daemon.sh"),
+        encoding: .utf8
+    )
+    let main = try String(
+        contentsOf: repositoryRoot().appendingPathComponent(
+            "apps/AccioComputerUse/Sources/AccioComputerUse/AccioComputerUseMain.swift"
+        ),
+        encoding: .utf8
+    )
+
+    #expect(daemonInstaller.contains("launch_agent_last_exit_code"))
+    #expect(daemonInstaller.contains("[[ \"$last_exit\" == \"2\" ]]"))
+    #expect(daemonInstaller.contains("health_status=2"))
+    #expect(daemonInstaller.contains("launchctl bootout \"gui/$(id -u)/$LABEL\""))
+    #expect(daemonInstaller.contains("rm -f \"$SOCKET_PATH\" \"$PLIST_PATH\""))
+    #expect(main.contains("catch let error as DaemonStartupError"))
+    #expect(main.contains("exit(error.exitCode)"))
+}
+
+@Test("verification checks daemon only when installation owns its running state")
+func verificationRespectsDaemonInstallScope() throws {
+    let installer = try String(
+        contentsOf: repositoryRoot().appendingPathComponent("scripts/install-macos.sh"),
+        encoding: .utf8
+    )
+
+    #expect(installer.contains("$NO_ONBOARDING\" != true && ! -f \"$DAEMON_PLIST\""))
+    #expect(!installer.contains("! -f \"$DAEMON_PLIST\" || \"$VERIFY\" == true"))
+    #expect(installer.contains("Opening the Accio app permission window"))
+    #expect(installer.contains("/usr/bin/open \"$APP_BUNDLE\""))
+    #expect(!installer.contains("/usr/bin/open -n \"$APP_BUNDLE\""))
+    let verifyBlock = try #require(installer.range(of: "if [[ \"$VERIFY\" == true ]]"))
+    let verifyBody = String(installer[verifyBlock.lowerBound...])
+    #expect(verifyBody.contains("Running persistent daemon health check..."))
+    #expect(verifyBody.contains(
+        "if [[ \"$REINSTALL_DAEMON\" == true || \"$ONBOARDING_COMPLETED\" == true ]]"
+    ))
+    #expect(verifyBody.contains(
+        "Skipping persistent daemon health check: --no-onboarding did not request daemon installation."
+    ))
+    #expect(verifyBody.contains(
+        "Skipping persistent daemon health check: the LaunchAgent was intentionally unloaded before installation."
+    ))
 }
 
 @Test("TCC reset helper touches only Accio Accessibility and Screen Recording grants")
@@ -245,8 +526,17 @@ func persistentSigningRequirementRejectsWeakAnchors() throws {
         "designated => identifier \"com.accio.computeruse\" and anchor apple generic and certificate leaf[subject.OU] = TEAMID"
     ))
     #expect(try stableRequirementIsAccepted(
-        "designated => identifier \"com.accio.computeruse\" and certificate leaf = H\"0123456789ABCDEF\""
+        "designated => identifier \"com.accio.computeruse\" and certificate leaf = H\"0123456789ABCDEF0123456789ABCDEF01234567\""
     ))
+    #expect(try stableRequirementIsAccepted(
+        "designated => identifier \"com.accio.computeruse\" and certificate root = H\"8d6636f5c33b21ac9125c0a4959ce2bcbf9d44af\""
+    ))
+    #expect(try stableRequirementIsAccepted(
+        "designated => identifier \"com.accio.computeruse\" and anchor = H\"0123456789ABCDEF0123456789ABCDEF01234567\""
+    ))
+    #expect(!(try stableRequirementIsAccepted(
+        "designated => identifier \"com.accio.computeruse\" and certificate root = H\"0123456789ABCDEF\""
+    )))
     #expect(!(try stableRequirementIsAccepted(
         "designated => identifier \"com.accio.computeruse\" and anchor trusted"
     )))

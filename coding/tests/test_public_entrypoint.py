@@ -20,9 +20,12 @@ class PublicEntrypointTests(unittest.TestCase):
     def test_installer_verifies_coding_mode_by_path_and_command_name(self):
         installer = (REPO_ROOT / "scripts" / "install-macos.sh").read_text()
 
-        self.assertIn('"$TARGET_PATH" code --version', installer)
         self.assertIn(
-            'env PATH="$INSTALL_DIR:$PATH" "$BINARY_NAME" code --version',
+            'env -u ACCIO_COMPUTER_USE_CODING_RUNNER "$TARGET_PATH" code --version',
+            installer,
+        )
+        self.assertIn(
+            'PATH="$INSTALL_DIR:$PATH" "$BINARY_NAME" code --version',
             installer,
         )
 
@@ -47,6 +50,26 @@ class PublicEntrypointTests(unittest.TestCase):
         self.assertIn("Status: loaded but unhealthy", daemon_installer)
         self.assertIn("DAEMON_RESTART_HEALTHY", app_installer)
         self.assertIn('"$REPO_ROOT/scripts/install-daemon.sh" status', app_installer)
+
+    def test_first_install_is_resumable_and_gates_daemon_on_permissions(self):
+        daemon_installer = (REPO_ROOT / "scripts" / "install-daemon.sh").read_text()
+        app_installer = (REPO_ROOT / "scripts" / "install-macos.sh").read_text()
+
+        self.assertIn("--continue-install", app_installer)
+        self.assertIn("setup --wait-for-permissions", app_installer)
+        self.assertIn("finish_onboarding", app_installer)
+        self.assertIn("accio_daemon_reinstall_failure_action", app_installer)
+        self.assertIn("onboarding was not started", app_installer)
+        permission_pending = app_installer.index(
+            'elif [[ "$DAEMON_FAILURE_ACTION" == "permission-pending" ]]'
+        )
+        pending_exit = app_installer.index("exit 2", permission_pending)
+        pending_block = app_installer[permission_pending:pending_exit]
+        self.assertIn("UPGRADE_DAEMON_REINSTALLED=true", pending_block)
+        self.assertIn('"$binary" permission-status', daemon_installer)
+        permission_gate = daemon_installer.index('"$binary" permission-status')
+        write_plist = daemon_installer.index('cat > "$PLIST_PATH"')
+        self.assertLess(permission_gate, write_plist)
 
     def test_scroll_skill_prefers_precise_filtering_and_visual_recovery(self):
         skill = (

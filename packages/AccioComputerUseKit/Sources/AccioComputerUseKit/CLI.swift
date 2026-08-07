@@ -4,7 +4,8 @@ import Foundation
 public enum CLICommand: Equatable {
     case gui
     case code(arguments: [String])
-    case setup
+    case setup(waitForPermissions: Bool)
+    case permissionStatus
     case mcp
     case serve(socketPath: String?)
     case daemonStatus(socketPath: String?)
@@ -103,11 +104,24 @@ public func parseCLI(
     case "-v", "--version", "version":
         return .version
     case "setup", "tui":
-        guard arguments.count == 1 else {
-            if arguments.count == 2, ["-h", "--help"].contains(arguments[1]) { return .help(command: "setup") }
-            throw CLIError(message: "\(first) does not accept arguments", helpCommand: "setup")
+        if arguments.count == 2, ["-h", "--help"].contains(arguments[1]) {
+            return .help(command: "setup")
         }
-        return .setup
+        if arguments.count == 2, arguments[1] == "--wait-for-permissions" {
+            return .setup(waitForPermissions: true)
+        }
+        guard arguments.count == 1 else {
+            throw CLIError(
+                message: "\(first) accepts only --wait-for-permissions",
+                helpCommand: "setup"
+            )
+        }
+        return .setup(waitForPermissions: false)
+    case "permission-status":
+        guard arguments.count == 1 else {
+            throw CLIError(message: "permission-status does not accept arguments")
+        }
+        return .permissionStatus
     case "code":
         return .code(arguments: Array(arguments.dropFirst()))
     case "mcp":
@@ -211,6 +225,7 @@ public func helpText(command: String? = nil) -> String {
         return """
         Usage:
           accio-computer-use setup
+          accio-computer-use setup --wait-for-permissions
 
         Recommended first-run setup for permissions, daemon state, MCP config,
         install model, logs, and menu bar helper guidance. On macOS the app
@@ -218,6 +233,8 @@ public func helpText(command: String? = nil) -> String {
         Seeing "Accio Computer Use" in System Settings' app lists is expected.
         In an interactive terminal this opens a small TUI menu; in
         non-interactive contexts it prints a status dashboard and exits.
+        --wait-for-permissions guides first-run authorization and exits only
+        after both permissions are effective. It is used by the installer.
         """
     case "mcp":
         return """

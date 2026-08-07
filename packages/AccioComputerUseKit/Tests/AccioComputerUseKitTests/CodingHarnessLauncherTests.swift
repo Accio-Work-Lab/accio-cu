@@ -141,3 +141,27 @@ func codingRunnerIgnoresWorkingDirectory() throws {
 
     #expect(resolved == nil)
 }
+
+@Test("runner diagnostics report the executable and every unique candidate")
+func codingRunnerDiagnosticsAreActionable() throws {
+    let executable = URL(fileURLWithPath: "/Applications/Accio Computer Use.app/Contents/MacOS/accio-computer-use")
+    let resources = URL(fileURLWithPath: "/Applications/Accio Computer Use.app/Contents/Resources")
+    let candidates = CodingHarnessLauncher.runnerCandidates(
+        environment: [:],
+        bundleResourceURL: resources,
+        executableURL: executable
+    )
+
+    #expect(candidates.map(\.path) == [
+        "/Applications/Accio Computer Use.app/Contents/Resources/coding/runner.py",
+    ])
+
+    let error = CodingHarnessLaunchError.runnerNotFound(
+        executablePath: executable.path,
+        searchedPaths: candidates.map(\.path)
+    )
+    let description = try #require(error.errorDescription)
+    #expect(description.contains("Executable: \(executable.path)"))
+    #expect(description.contains(candidates[0].path))
+    #expect(description.contains("command -v accio-computer-use"))
+}
